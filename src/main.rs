@@ -1,8 +1,8 @@
-pub mod inst;
-pub mod program;
+mod inst;
+mod program;
 
 fn main() {
-    let file = std::env::args().nth(1).expect("required argument");
+    let file = std::env::args().nth(1).expect("required input file as argument argument");
     let contents =
         std::fs::read_to_string(&format!("asm/{}.asm", file)).expect("failed to open file");
 

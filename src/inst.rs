@@ -200,6 +200,9 @@ mod tests {
         assert_eq!(ArchReg::from_str("r1"), Ok(ArchReg::R1));
         assert_eq!(ArchReg::from_str("r11"), Ok(ArchReg::R11));
         assert_eq!(ArchReg::from_str("r15"), Ok(ArchReg::R15));
+        assert!(ArchReg::from_str("0").is_err());
+        assert!(ArchReg::from_str("r-0").is_err());
+        assert!(ArchReg::from_str("r-1").is_err());
         assert!(ArchReg::from_str("r50").is_err());
     }
 
@@ -208,6 +211,7 @@ mod tests {
         assert_eq!(MemRef::from_str("[r1]"), Ok(MemRef { base: Imm(0), offset: ArchReg::R1 }));
         assert_eq!(MemRef::from_str("[r1 + 0]"), Ok(MemRef { base: Imm(0), offset: ArchReg::R1 }));
         assert_eq!(MemRef::from_str("[0 + r1]"), Ok(MemRef { base: Imm(0), offset: ArchReg::R1 }));
+        assert_eq!(MemRef::from_str("[r1+5]"), Ok(MemRef { base: Imm(5), offset: ArchReg::R1 }));
         assert_eq!(MemRef::from_str("[r1 - 0]"), Ok(MemRef { base: Imm(0), offset: ArchReg::R1 }));
         assert_eq!(MemRef::from_str("[zero - 0]"), Ok(MemRef { base: Imm(0), offset: ArchReg::Zero }));
         assert_eq!(MemRef::from_str("[r1 + 1]"), Ok(MemRef { base: Imm(1), offset: ArchReg::R1 }));
