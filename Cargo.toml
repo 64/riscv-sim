@@ -1,0 +1,9 @@
+[package]
+name = "aca"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+
+[dependencies]
+num_enum = "0.5.6"
