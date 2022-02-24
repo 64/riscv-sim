@@ -17,6 +17,8 @@ impl FromStr for Program {
 
         for (i, line) in s.lines().enumerate() {
             let line = line.trim();
+            // Strip comments and empty lines
+            let line = &line[..line.find("//").unwrap_or(line.len())];
             if line.is_empty() {
                 continue;
             }

@@ -37,16 +37,21 @@ pub enum ArchReg {
     Return,
 }
 
-
 #[derive(Debug)]
 pub enum Inst {
-    Load(ArchReg, MemRef),
-    Store(MemRef, ArchReg),
+    LoadImm(ArchReg, Imm),
+    LoadByte(ArchReg, MemRef),
+    LoadHalfWord(ArchReg, MemRef),
+    LoadWord(ArchReg, MemRef),
+    StoreByte(MemRef, ArchReg),
+    StoreHalfWord(MemRef, ArchReg),
+    StoreWord(MemRef, ArchReg),
     Add(ArchReg, ArchReg, ArchReg),
     Mul(ArchReg, ArchReg, ArchReg),
     Not(ArchReg),
     Jump(Label),
     JumpIfEqual(ArchReg, ArchReg, Label),
+    JumpIfNotEqual(ArchReg, ArchReg, Label),
     Nop,
 }
 
@@ -65,17 +70,24 @@ impl FromStr for Inst {
         };
         let reg_arg = |n: usize| -> Result<ArchReg, String> { ArchReg::from_str(nth_arg(n)?) };
         let mem_arg = |n: usize| -> Result<MemRef, String> { MemRef::from_str(nth_arg(n)?) };
+        let imm_arg = |n: usize| -> Result<Imm, String> { Imm::from_str(nth_arg(n)?) };
         let label_arg = |n: usize| -> Result<Label, String> { Label::from_str(nth_arg(n)?) };
 
         let inst = match op.to_lowercase().as_str() {
             "nop" => Inst::Nop,
-            "load" => Inst::Load(reg_arg(0)?, mem_arg(1)?),
-            "store" => Inst::Store(mem_arg(0)?, reg_arg(1)?),
+            "loadi" => Inst::LoadImm(reg_arg(0)?, imm_arg(1)?),
+            "loadb" => Inst::LoadByte(reg_arg(0)?, mem_arg(1)?),
+            "loadh" => Inst::LoadHalfWord(reg_arg(0)?, mem_arg(1)?),
+            "loadw" => Inst::LoadWord(reg_arg(0)?, mem_arg(1)?),
+            "storeb" => Inst::StoreByte(mem_arg(0)?, reg_arg(1)?),
+            "storeh" => Inst::StoreHalfWord(mem_arg(0)?, reg_arg(1)?),
+            "storew" => Inst::StoreWord(mem_arg(0)?, reg_arg(1)?),
             "add" => Inst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "mul" => Inst::Mul(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "not" => Inst::Not(reg_arg(0)?),
             "jmp" => Inst::Jump(label_arg(0)?),
             "jeq" => Inst::JumpIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "jne" => Inst::JumpIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             _ => return Err(format!("unknown instruction: '{}'", op)),
         };
 
