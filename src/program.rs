@@ -1,8 +1,7 @@
-use std::str::FromStr;
-use std::collections::HashMap;
 use crate::inst::{Inst, Label};
+use std::{collections::HashMap, str::FromStr};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub insts: Vec<Inst>,
     pub labels: HashMap<Label, usize>, // indices into the insts array

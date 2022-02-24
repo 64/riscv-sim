@@ -1,5 +1,4 @@
-use aca::program::Program;
-use aca::inst::Label;
+use aca::{inst::Label, program::Program};
 use std::collections::HashMap;
 
 #[test]

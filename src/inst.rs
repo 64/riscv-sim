@@ -1,19 +1,19 @@
 use num_enum::TryFromPrimitive;
 use std::str::FromStr;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Imm(pub u32);
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Label(pub String);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct MemRef {
-    base: Imm,
-    offset: ArchReg,
+    pub base: Imm,
+    pub offset: ArchReg,
 }
 
-#[derive(Debug, PartialEq, Eq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, TryFromPrimitive)]
 #[repr(u8)]
 pub enum ArchReg {
     R0,
@@ -37,7 +37,7 @@ pub enum ArchReg {
     Return,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Inst {
     LoadImm(ArchReg, Imm),
     LoadByte(ArchReg, MemRef),
@@ -47,6 +47,7 @@ pub enum Inst {
     StoreHalfWord(MemRef, ArchReg),
     StoreWord(MemRef, ArchReg),
     Add(ArchReg, ArchReg, ArchReg),
+    AddImm(ArchReg, ArchReg, Imm),
     Mul(ArchReg, ArchReg, ArchReg),
     Not(ArchReg),
     Jump(Label),
@@ -83,6 +84,7 @@ impl FromStr for Inst {
             "storeh" => Inst::StoreHalfWord(mem_arg(0)?, reg_arg(1)?),
             "storew" => Inst::StoreWord(mem_arg(0)?, reg_arg(1)?),
             "add" => Inst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
+            "addi" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "mul" => Inst::Mul(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "not" => Inst::Not(reg_arg(0)?),
             "jmp" => Inst::Jump(label_arg(0)?),
@@ -114,7 +116,7 @@ impl FromStr for Imm {
         } else if let Ok(s) = i32::try_from(val) {
             assert!(s < 0);
             let abs: u32 = s.abs().try_into().unwrap();
-            return Ok(Self(u32::MAX - abs)); 
+            return Ok(Self(u32::MAX - abs));
         } else {
             return Err(format!("invalid immediate: '{s}'"));
         }
@@ -167,13 +169,22 @@ impl FromStr for MemRef {
         let plus_used = inner.find('+').is_some();
         if plus_used {
             if let (Ok(reg), Ok(imm)) = (ArchReg::from_str(fst), Imm::from_str(snd)) {
-                return Ok(Self { base: imm, offset: reg });
+                return Ok(Self {
+                    base: imm,
+                    offset: reg,
+                });
             } else if let (Ok(imm), Ok(reg)) = (Imm::from_str(fst), ArchReg::from_str(snd)) {
-                return Ok(Self { base: imm, offset: reg });
+                return Ok(Self {
+                    base: imm,
+                    offset: reg,
+                });
             }
         } else {
             if let (Ok(reg), Ok(imm)) = (ArchReg::from_str(fst), Imm::from_str(snd)) {
-                return Ok(Self { base: Imm(imm.0.wrapping_neg()), offset: reg });
+                return Ok(Self {
+                    base: Imm(imm.0.wrapping_neg()),
+                    offset: reg,
+                });
             }
         }
 
@@ -220,18 +231,90 @@ mod tests {
 
     #[test]
     fn test_memref() {
-        assert_eq!(MemRef::from_str("[r1]"), Ok(MemRef { base: Imm(0), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[r1 + 0]"), Ok(MemRef { base: Imm(0), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[0 + r1]"), Ok(MemRef { base: Imm(0), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[r1+5]"), Ok(MemRef { base: Imm(5), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[r1 - 0]"), Ok(MemRef { base: Imm(0), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[zero - 0]"), Ok(MemRef { base: Imm(0), offset: ArchReg::Zero }));
-        assert_eq!(MemRef::from_str("[r1 + 1]"), Ok(MemRef { base: Imm(1), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[r1 + 0x123]"), Ok(MemRef { base: Imm(0x123), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[r1 - 1]"), Ok(MemRef { base: Imm(u32::MAX), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[r1 -1]"), Ok(MemRef { base: Imm(u32::MAX), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[r1 - 2]"), Ok(MemRef { base: Imm(u32::MAX - 1), offset: ArchReg::R1 }));
-        assert_eq!(MemRef::from_str("[r1 - 0x123]"), Ok(MemRef { base: Imm(u32::MAX - 0x123 + 1), offset: ArchReg::R1 }));
+        assert_eq!(
+            MemRef::from_str("[r1]"),
+            Ok(MemRef {
+                base: Imm(0),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1 + 0]"),
+            Ok(MemRef {
+                base: Imm(0),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[0 + r1]"),
+            Ok(MemRef {
+                base: Imm(0),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1+5]"),
+            Ok(MemRef {
+                base: Imm(5),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1 - 0]"),
+            Ok(MemRef {
+                base: Imm(0),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[zero - 0]"),
+            Ok(MemRef {
+                base: Imm(0),
+                offset: ArchReg::Zero
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1 + 1]"),
+            Ok(MemRef {
+                base: Imm(1),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1 + 0x123]"),
+            Ok(MemRef {
+                base: Imm(0x123),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1 - 1]"),
+            Ok(MemRef {
+                base: Imm(u32::MAX),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1 -1]"),
+            Ok(MemRef {
+                base: Imm(u32::MAX),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1 - 2]"),
+            Ok(MemRef {
+                base: Imm(u32::MAX - 1),
+                offset: ArchReg::R1
+            })
+        );
+        assert_eq!(
+            MemRef::from_str("[r1 - 0x123]"),
+            Ok(MemRef {
+                base: Imm(u32::MAX - 0x123 + 1),
+                offset: ArchReg::R1
+            })
+        );
 
         assert!(MemRef::from_str("[-r1 + 0]").is_err());
         assert!(MemRef::from_str("[r1 + 0 + 0]").is_err());
@@ -246,9 +329,18 @@ mod tests {
     fn test_label() {
         assert_eq!(Label::from_str("foo"), Ok(Label("foo".to_string())));
         assert_eq!(Label::from_str(".foo"), Ok(Label(".foo".to_string())));
-        assert_eq!(Label::from_str(".foo_bar"), Ok(Label(".foo_bar".to_string())));
-        assert_eq!(Label::from_str(".foo_bar5"), Ok(Label(".foo_bar5".to_string())));
-        assert_eq!(Label::from_str(".foo_BaR5"), Ok(Label(".foo_BaR5".to_string())));
+        assert_eq!(
+            Label::from_str(".foo_bar"),
+            Ok(Label(".foo_bar".to_string()))
+        );
+        assert_eq!(
+            Label::from_str(".foo_bar5"),
+            Ok(Label(".foo_bar5".to_string()))
+        );
+        assert_eq!(
+            Label::from_str(".foo_BaR5"),
+            Ok(Label(".foo_BaR5".to_string()))
+        );
         assert_eq!(Label::from_str("FOO_bar"), Ok(Label("FOO_bar".to_string())));
 
         assert_ne!(Label::from_str("foo"), Label::from_str("bar"));
