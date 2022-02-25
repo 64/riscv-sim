@@ -4,7 +4,7 @@ use std::{collections::HashMap, str::FromStr};
 #[derive(Debug, Clone)]
 pub struct Program {
     pub insts: Vec<Inst>,
-    pub labels: HashMap<Label, usize>, // indices into the insts array
+    pub labels: HashMap<Label, u32>, // indices into the insts array
 }
 
 impl FromStr for Program {
@@ -24,7 +24,7 @@ impl FromStr for Program {
 
             if line.ends_with(':') {
                 match Label::from_str(&line[0..line.len() - 1]) {
-                    Ok(label) => labels.insert(label, insts.len()),
+                    Ok(label) => labels.insert(label, insts.len().try_into().unwrap()),
                     Err(e) => return Err(format!("error parsing label on line {i}: {e}")),
                 };
             } else {

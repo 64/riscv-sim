@@ -1,5 +1,5 @@
-use num_enum::TryFromPrimitive;
 use std::str::FromStr;
+use strum::{self, EnumString};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Imm(pub u32);
@@ -9,32 +9,32 @@ pub struct Label(pub String);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct MemRef {
-    pub base: Imm,
-    pub offset: ArchReg,
+    pub base: ArchReg,
+    pub offset: Imm,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, TryFromPrimitive)]
-#[repr(u8)]
+// https://en.wikichip.org/wiki/risc-v/registers
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumString)]
+#[strum(serialize_all = "lowercase")]
 pub enum ArchReg {
-    R0,
-    R1,
-    R2,
-    R3,
-    R4,
-    R5,
-    R6,
-    R7,
-    R8,
-    R9,
-    R10,
-    R11,
-    R12,
-    R13,
-    R14,
-    R15,
     Zero,
-    Stack,
-    Return,
+    RA,
+    SP,
+    T0,
+    T1,
+    T2,
+    T3,
+    T4,
+    T5,
+    T6,
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +47,7 @@ pub enum Inst {
     StoreWord(MemRef, ArchReg),
     Add(ArchReg, ArchReg, ArchReg),
     AddImm(ArchReg, ArchReg, Imm),
+    JumpAndLink(ArchReg, Imm),
     BranchIfEqual(ArchReg, ArchReg, Label),
     BranchIfNotEqual(ArchReg, ArchReg, Label),
 }
@@ -64,10 +65,12 @@ impl FromStr for Inst {
                 .and_then(|s| if s.is_empty() { None } else { Some(s) })
                 .ok_or_else(|| format!("cannot fetch argument {n}"))
         };
-        let reg_arg = |n: usize| -> Result<ArchReg, String> { ArchReg::from_str(nth_arg(n)?) };
         let mem_arg = |n: usize| -> Result<MemRef, String> { MemRef::from_str(nth_arg(n)?) };
         let imm_arg = |n: usize| -> Result<Imm, String> { Imm::from_str(nth_arg(n)?) };
         let label_arg = |n: usize| -> Result<Label, String> { Label::from_str(nth_arg(n)?) };
+        let reg_arg = |n: usize| -> Result<ArchReg, String> {
+            ArchReg::from_str(nth_arg(n)?).map_err(|e| e.to_string())
+        };
 
         let inst = match op.to_lowercase().as_str() {
             "lb" => Inst::LoadByte(reg_arg(0)?, mem_arg(1)?),
@@ -79,7 +82,8 @@ impl FromStr for Inst {
             "add" => Inst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "addi" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "li" => Inst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
-            "nop" => Inst::AddImm(ArchReg::R0, ArchReg::R0, Imm(0)),
+            "nop" => Inst::AddImm(ArchReg::Zero, ArchReg::Zero, Imm(0)),
+            "jal" => Inst::JumpAndLink(reg_arg(0)?, imm_arg(1)?),
             "beq" => Inst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bne" => Inst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             _ => return Err(format!("unknown instruction: '{}'", op)),
@@ -108,7 +112,7 @@ impl FromStr for Imm {
         } else if let Ok(s) = i32::try_from(val) {
             assert!(s < 0);
             let abs: u32 = s.abs().try_into().unwrap();
-            return Ok(Self(u32::MAX - abs));
+            return Ok(Self(u32::MAX - abs + 1));
         } else {
             return Err(format!("invalid immediate: '{s}'"));
         }
@@ -130,74 +134,22 @@ impl FromStr for MemRef {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let inner = s
-            .strip_prefix('[')
-            .and_then(|s| s.strip_suffix(']'))
-            .map(|s| s.trim())
-            .ok_or_else(|| format!("invalid memory reference (no []): '{s}'"))?;
+        let (outer, rest) = s.split_once('(')
+            .ok_or_else(|| format!("invalid memory reference (expected '('): '{s}'"))?;
+        let (inner, rest) = rest
+            .split_once(')')
+            .ok_or_else(|| format!("invalid memory reference (expected ')'): '{s}'"))?;
 
-        if let Ok(reg) = inner.parse::<ArchReg>() {
-            return Ok(MemRef {
-                base: Imm(0),
-                offset: reg,
-            });
-        } else if let Ok(imm) = inner.parse::<Imm>() {
-            return Ok(MemRef {
-                base: imm,
-                offset: ArchReg::Zero,
-            });
+        if !rest.trim().is_empty() {
+            return Err(format!("invalid memory reference (unexpected suffix): '{s}'"));
         }
 
-        if inner.matches(&['+', '-']).count() > 1 {
-            return Err(format!("invalid memory reference (too many +-): '{s}'"));
-        }
+        let base = inner.parse::<ArchReg>().map_err(|_| format!("invalid mem ref (reg): '{s}'"))?;
+        let offset = outer.parse::<Imm>().map_err(|_| format!("invalid mem ref (imm): '{s}'"))?;
 
-        let (fst, snd) = inner
-            .split_once(&['+', '-'])
-            .ok_or_else(|| format!("invalid memory reference (no +-): '{s}'"))?;
-        let (fst, snd) = (fst.trim(), snd.trim());
-
-        // Handle [reg + imm], [reg - imm], [imm + reg]
-        let plus_used = inner.find('+').is_some();
-        if plus_used {
-            if let (Ok(reg), Ok(imm)) = (ArchReg::from_str(fst), Imm::from_str(snd)) {
-                return Ok(Self {
-                    base: imm,
-                    offset: reg,
-                });
-            } else if let (Ok(imm), Ok(reg)) = (Imm::from_str(fst), ArchReg::from_str(snd)) {
-                return Ok(Self {
-                    base: imm,
-                    offset: reg,
-                });
-            }
-        } else {
-            if let (Ok(reg), Ok(imm)) = (ArchReg::from_str(fst), Imm::from_str(snd)) {
-                return Ok(Self {
-                    base: Imm(imm.0.wrapping_neg()),
-                    offset: reg,
-                });
-            }
-        }
-
-        return Err(format!("invalid memory reference (not matched): '{s}'"));
-    }
-}
-
-impl FromStr for ArchReg {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "zero" => ArchReg::Zero,
-            "sp" => ArchReg::Stack,
-            "ra" => ArchReg::Return,
-            _ if s.starts_with('r') => match s[1..].parse::<u8>().map(|i| ArchReg::try_from(i)) {
-                Ok(Ok(reg)) => reg,
-                Ok(Err(e)) => return Err(e.to_string()),
-                Err(e) => return Err(e.to_string()),
-            },
-            _ => return Err(format!("unknown register: '{s}'")),
+        Ok(MemRef {
+            base,
+            offset,
         })
     }
 }
@@ -209,130 +161,46 @@ mod tests {
     #[test]
     fn test_reg() {
         assert_eq!(ArchReg::from_str("zero"), Ok(ArchReg::Zero));
-        assert_eq!(ArchReg::from_str("sp"), Ok(ArchReg::Stack));
-        assert_eq!(ArchReg::from_str("ra"), Ok(ArchReg::Return));
-        assert_eq!(ArchReg::from_str("r0"), Ok(ArchReg::R0));
-        assert_eq!(ArchReg::from_str("r1"), Ok(ArchReg::R1));
-        assert_eq!(ArchReg::from_str("r11"), Ok(ArchReg::R11));
-        assert_eq!(ArchReg::from_str("r15"), Ok(ArchReg::R15));
+        assert_eq!(ArchReg::from_str("sp"), Ok(ArchReg::SP));
+        assert_eq!(ArchReg::from_str("ra"), Ok(ArchReg::RA));
+        assert_eq!(ArchReg::from_str("a0"), Ok(ArchReg::A0));
+        assert_eq!(ArchReg::from_str("a1"), Ok(ArchReg::A1));
+        assert_eq!(ArchReg::from_str("a7"), Ok(ArchReg::A7));
+        assert_eq!(ArchReg::from_str("t0"), Ok(ArchReg::T0));
+        assert_eq!(ArchReg::from_str("t1"), Ok(ArchReg::T1));
         assert!(ArchReg::from_str("0").is_err());
-        assert!(ArchReg::from_str("r-0").is_err());
-        assert!(ArchReg::from_str("r-1").is_err());
-        assert!(ArchReg::from_str("r50").is_err());
+        assert!(ArchReg::from_str("a-0").is_err());
+        assert!(ArchReg::from_str("a-1").is_err());
+        assert!(ArchReg::from_str("a50").is_err());
     }
 
     #[test]
+    #[rustfmt::skip]
     fn test_memref() {
-        assert_eq!(
-            MemRef::from_str("[r1]"),
-            Ok(MemRef {
-                base: Imm(0),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1 + 0]"),
-            Ok(MemRef {
-                base: Imm(0),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[0 + r1]"),
-            Ok(MemRef {
-                base: Imm(0),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1+5]"),
-            Ok(MemRef {
-                base: Imm(5),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1 - 0]"),
-            Ok(MemRef {
-                base: Imm(0),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[zero - 0]"),
-            Ok(MemRef {
-                base: Imm(0),
-                offset: ArchReg::Zero
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1 + 1]"),
-            Ok(MemRef {
-                base: Imm(1),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1 + 0x123]"),
-            Ok(MemRef {
-                base: Imm(0x123),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1 - 1]"),
-            Ok(MemRef {
-                base: Imm(u32::MAX),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1 -1]"),
-            Ok(MemRef {
-                base: Imm(u32::MAX),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1 - 2]"),
-            Ok(MemRef {
-                base: Imm(u32::MAX - 1),
-                offset: ArchReg::R1
-            })
-        );
-        assert_eq!(
-            MemRef::from_str("[r1 - 0x123]"),
-            Ok(MemRef {
-                base: Imm(u32::MAX - 0x123 + 1),
-                offset: ArchReg::R1
-            })
-        );
+        assert_eq!(MemRef::from_str("0(a1)"), Ok(MemRef { offset: Imm(0), base: ArchReg::A1 }));
+        assert_eq!(MemRef::from_str("5(a1)"), Ok(MemRef { offset: Imm(5), base: ArchReg::A1 }));
+        assert_eq!(MemRef::from_str("-0(a1)"), Ok(MemRef { offset: Imm(0), base: ArchReg::A1 }));
+        assert_eq!(MemRef::from_str("-0(zero)"), Ok(MemRef { offset: Imm(0), base: ArchReg::Zero }));
+        assert_eq!(MemRef::from_str("1(a1)"), Ok(MemRef { offset: Imm(1), base: ArchReg::A1 }));
+        assert_eq!(MemRef::from_str("0x123(a1)"), Ok(MemRef { offset: Imm(0x123), base: ArchReg::A1 }));
+        assert_eq!(MemRef::from_str("-1(a1)"), Ok(MemRef { offset: Imm(u32::MAX), base: ArchReg::A1 }));
+        assert_eq!(MemRef::from_str("-2(a1)"), Ok(MemRef { offset: Imm(u32::MAX - 1), base: ArchReg::A1 }));
+        assert_eq!(MemRef::from_str("-0x123(a1)"), Ok(MemRef { offset: Imm(u32::MAX - 0x123 + 1), base: ArchReg::A1 }));
 
-        assert!(MemRef::from_str("[-r1 + 0]").is_err());
-        assert!(MemRef::from_str("[r1 + 0 + 0]").is_err());
-        assert!(MemRef::from_str("[0 + r1 + 0]").is_err());
-        assert!(MemRef::from_str("[0 - r1]").is_err());
-        assert!(MemRef::from_str("[0 - +r1]").is_err());
-        assert!(MemRef::from_str("[r1 - +0]").is_err());
-        assert!(MemRef::from_str("[r1 + -0]").is_err());
+        assert!(MemRef::from_str("(a1)").is_err());
+        assert!(MemRef::from_str("0").is_err());
+        assert!(MemRef::from_str("a1(0)").is_err());
+        assert!(MemRef::from_str("()").is_err());
     }
 
     #[test]
+    #[rustfmt::skip]
     fn test_label() {
         assert_eq!(Label::from_str("foo"), Ok(Label("foo".to_string())));
         assert_eq!(Label::from_str(".foo"), Ok(Label(".foo".to_string())));
-        assert_eq!(
-            Label::from_str(".foo_bar"),
-            Ok(Label(".foo_bar".to_string()))
-        );
-        assert_eq!(
-            Label::from_str(".foo_bar5"),
-            Ok(Label(".foo_bar5".to_string()))
-        );
-        assert_eq!(
-            Label::from_str(".foo_BaR5"),
-            Ok(Label(".foo_BaR5".to_string()))
-        );
+        assert_eq!(Label::from_str(".foo_bar"), Ok(Label(".foo_bar".to_string())));
+        assert_eq!(Label::from_str(".foo_bar5"), Ok(Label(".foo_bar5".to_string())));
+        assert_eq!(Label::from_str(".foo_BaR5"), Ok(Label(".foo_BaR5".to_string())));
         assert_eq!(Label::from_str("FOO_bar"), Ok(Label("FOO_bar".to_string())));
 
         assert_ne!(Label::from_str("foo"), Label::from_str("bar"));

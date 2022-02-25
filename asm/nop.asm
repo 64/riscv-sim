@@ -1,3 +1,0 @@
-// hello
-
-nop // world

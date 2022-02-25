@@ -3,19 +3,19 @@
 //     a[i] = b[i] + c[i];
 // }
 
-	li r6, 40
+	li t6, 40
 
 .begin:
-	add r10, r1, r5
-	lw r15, [r10]
+	add t1, a1, t0
+	lw t2, 0(t1)
 	
-	add r10, r2, r5
-	lw r14, [r10]
+	add t1, a2, t0
+	lw t3, 0(t1)
 
-	add r13, r14, r15
-	add r10, r0, r5
-	sw [r10], r13
+	add t4, t2, t3
+	add t1, a0, t0
+	sw 0(t1), t4
 
-	addi r5, r5, 4
-	bne r5, r6, .begin
+	addi t0, t0, 4
+	bne t0, t6, .begin
 .end:

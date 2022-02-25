@@ -28,7 +28,7 @@ pub struct Cpu {
     pub regs: RegSet,
     pub mem: Memory,
     pub prog: Program,
-    pub ip: usize,
+    pub ip: u32,
     pub cycles: u64,
 }
 
@@ -46,7 +46,7 @@ impl Cpu {
     }
 
     pub fn exec_one(&mut self) -> CpuState {
-        let next_inst = match self.prog.insts.get(self.ip) {
+        let next_inst = match self.prog.insts.get(usize::try_from(self.ip).unwrap()) {
             Some(i) => i,
             None => return CpuState::Stopped,
         };
@@ -88,6 +88,11 @@ impl Cpu {
                 let b = imm.0;
                 self.regs.set(dst, a.wrapping_add(b));
             }
+            Inst::JumpAndLink(dst, ref offset) => {
+                self.regs.set(dst, self.ip + 1);
+                self.ip += offset.0;
+                advance_ip = false;
+            }
             Inst::BranchIfEqual(src0, src1, ref dst) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
@@ -106,11 +111,11 @@ impl Cpu {
             }
         }
 
-        self.cycles += 1;
-
         if advance_ip {
             self.ip += 1;
         }
+
+        self.cycles += 1;
 
         CpuState::Running
     }
@@ -133,12 +138,13 @@ impl RegSet {
     }
 
     pub fn set(&mut self, reg: ArchReg, value: u32) {
-        assert!(reg != ArchReg::Zero);
-        self.regs.insert(reg, value);
+        if reg != ArchReg::Zero {
+            self.regs.insert(reg, value);
+        }
     }
 
     pub fn ref_to_addr(&self, mr: MemRef) -> Addr {
-        Addr(mr.base.0.wrapping_add(self.get(mr.offset)))
+        Addr(self.get(mr.base).wrapping_add(mr.offset.0))
     }
 }
 
