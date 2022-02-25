@@ -15,12 +15,15 @@ impl FromStr for Program {
         let mut labels = HashMap::new();
 
         for (i, line) in s.lines().enumerate() {
-            let line = line.trim();
             // Strip comments and empty lines
-            let line = &line[..line.find("//").unwrap_or(line.len())];
+            let line = line.trim();
+            let line = &line[..line.find(";").unwrap_or(line.len())];
             if line.is_empty() {
                 continue;
             }
+
+            // Line numbers start at 1
+            let i = i + 1;
 
             if line.ends_with(':') {
                 match Label::from_str(&line[0..line.len() - 1]) {
@@ -30,7 +33,7 @@ impl FromStr for Program {
             } else {
                 match Inst::from_str(line) {
                     Ok(inst) => insts.push(inst),
-                    Err(e) => return Err(format!("error parsing instruction on line {i}: {e}")),
+                    Err(e) => return Err(format!("error parsing instruction '{line}' on line {i}: {e}")),
                 }
             }
         }

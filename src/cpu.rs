@@ -66,15 +66,15 @@ impl Cpu {
                 let val = self.mem.readw(self.regs.ref_to_addr(src));
                 self.regs.set(dst, val);
             }
-            Inst::StoreByte(dst, src) => {
+            Inst::StoreByte(src, dst) => {
                 let dst = self.regs.ref_to_addr(dst);
                 self.mem.writeb(dst, self.regs.get(src));
             }
-            Inst::StoreHalfWord(dst, src) => {
+            Inst::StoreHalfWord(src, dst) => {
                 let dst = self.regs.ref_to_addr(dst);
                 self.mem.writeh(dst, self.regs.get(src));
             }
-            Inst::StoreWord(dst, src) => {
+            Inst::StoreWord(src, dst) => {
                 let dst = self.regs.ref_to_addr(dst);
                 self.mem.writew(dst, self.regs.get(src));
             }
@@ -87,6 +87,11 @@ impl Cpu {
                 let a = self.regs.get(src);
                 let b = imm.0;
                 self.regs.set(dst, a.wrapping_add(b));
+            }
+            Inst::ShiftLeftLogicalImm(dst, src, imm) => {
+                let a = self.regs.get(src);
+                let b = imm.0;
+                self.regs.set(dst, a.wrapping_shl(b));
             }
             Inst::JumpAndLink(dst, ref offset) => {
                 self.regs.set(dst, self.ip + 1);
@@ -105,6 +110,14 @@ impl Cpu {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a != b {
+                    self.ip = self.prog.labels[dst];
+                    advance_ip = false;
+                }
+            }
+            Inst::BranchIfGreaterEqual(src0, src1, ref dst) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                if a >= b {
                     self.ip = self.prog.labels[dst];
                     advance_ip = false;
                 }

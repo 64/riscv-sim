@@ -12,7 +12,7 @@ fn test_loop() {
         .parse::<Program>()
         .expect("failed to parse asm/loop.asm");
 
-    let initial_regs = HashMap::from([(ArchReg::A0, 0), (ArchReg::A1, 40), (ArchReg::A2, 80)]);
+    let initial_regs = HashMap::from([(ArchReg::A0, 0), (ArchReg::A1, 40), (ArchReg::A2, 80), (ArchReg::A3, 10)]);
 
     let mut initial_mem = Memory::new();
     for i in 0..10 {

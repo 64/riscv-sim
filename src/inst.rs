@@ -37,19 +37,23 @@ pub enum ArchReg {
     A7,
 }
 
+// https://mark.theis.site/riscv/
+// https://web.eecs.utk.edu/~smarz1/courses/ece356/notes/assembly/
 #[derive(Debug, Clone)]
 pub enum Inst {
     LoadByte(ArchReg, MemRef),
     LoadHalfWord(ArchReg, MemRef),
     LoadWord(ArchReg, MemRef),
-    StoreByte(MemRef, ArchReg),
-    StoreHalfWord(MemRef, ArchReg),
-    StoreWord(MemRef, ArchReg),
+    StoreByte(ArchReg, MemRef),
+    StoreHalfWord(ArchReg, MemRef),
+    StoreWord(ArchReg, MemRef),
     Add(ArchReg, ArchReg, ArchReg),
     AddImm(ArchReg, ArchReg, Imm),
+    ShiftLeftLogicalImm(ArchReg, ArchReg, Imm),
     JumpAndLink(ArchReg, Imm),
     BranchIfEqual(ArchReg, ArchReg, Label),
     BranchIfNotEqual(ArchReg, ArchReg, Label),
+    BranchIfGreaterEqual(ArchReg, ArchReg, Label),
 }
 
 impl FromStr for Inst {
@@ -76,16 +80,20 @@ impl FromStr for Inst {
             "lb" => Inst::LoadByte(reg_arg(0)?, mem_arg(1)?),
             "lh" => Inst::LoadHalfWord(reg_arg(0)?, mem_arg(1)?),
             "lw" => Inst::LoadWord(reg_arg(0)?, mem_arg(1)?),
-            "sb" => Inst::StoreByte(mem_arg(0)?, reg_arg(1)?),
-            "sh" => Inst::StoreHalfWord(mem_arg(0)?, reg_arg(1)?),
-            "sw" => Inst::StoreWord(mem_arg(0)?, reg_arg(1)?),
+            "sb" => Inst::StoreByte(reg_arg(0)?, mem_arg(1)?),
+            "sh" => Inst::StoreHalfWord(reg_arg(0)?, mem_arg(1)?),
+            "sw" => Inst::StoreWord(reg_arg(0)?, mem_arg(1)?),
             "add" => Inst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "addi" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "slli" => Inst::ShiftLeftLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "li" => Inst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
             "nop" => Inst::AddImm(ArchReg::Zero, ArchReg::Zero, Imm(0)),
             "jal" => Inst::JumpAndLink(reg_arg(0)?, imm_arg(1)?),
             "beq" => Inst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bne" => Inst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "bge" => Inst::BranchIfGreaterEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "ble" => Inst::BranchIfGreaterEqual(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
+            "ret" => todo!(),
             _ => return Err(format!("unknown instruction: '{}'", op)),
         };
 
@@ -134,23 +142,27 @@ impl FromStr for MemRef {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (outer, rest) = s.split_once('(')
+        let (outer, rest) = s
+            .split_once('(')
             .ok_or_else(|| format!("invalid memory reference (expected '('): '{s}'"))?;
         let (inner, rest) = rest
             .split_once(')')
             .ok_or_else(|| format!("invalid memory reference (expected ')'): '{s}'"))?;
 
         if !rest.trim().is_empty() {
-            return Err(format!("invalid memory reference (unexpected suffix): '{s}'"));
+            return Err(format!(
+                "invalid memory reference (unexpected suffix): '{s}'"
+            ));
         }
 
-        let base = inner.parse::<ArchReg>().map_err(|_| format!("invalid mem ref (reg): '{s}'"))?;
-        let offset = outer.parse::<Imm>().map_err(|_| format!("invalid mem ref (imm): '{s}'"))?;
+        let base = inner
+            .parse::<ArchReg>()
+            .map_err(|_| format!("invalid mem ref (reg): '{s}'"))?;
+        let offset = outer
+            .parse::<Imm>()
+            .map_err(|_| format!("invalid mem ref (imm): '{s}'"))?;
 
-        Ok(MemRef {
-            base,
-            offset,
-        })
+        Ok(MemRef { base, offset })
     }
 }
 
