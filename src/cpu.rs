@@ -29,6 +29,7 @@ pub struct Cpu {
     pub mem: Memory,
     pub prog: Program,
     pub ip: usize,
+    pub cycles: u64,
 }
 
 impl Cpu {
@@ -38,6 +39,7 @@ impl Cpu {
         Cpu {
             regs: RegSet { regs: in_regs },
             ip: 0,
+            cycles: 0,
             mem,
             prog,
         }
@@ -52,8 +54,6 @@ impl Cpu {
         let mut advance_ip = true;
 
         match *next_inst {
-            Inst::Nop => (),
-            Inst::LoadImm(dst, imm) => self.regs.set(dst, imm.0),
             Inst::LoadByte(dst, src) => {
                 let val = self.mem.readb(self.regs.ref_to_addr(src));
                 self.regs.set(dst, val);
@@ -88,18 +88,7 @@ impl Cpu {
                 let b = imm.0;
                 self.regs.set(dst, a.wrapping_add(b));
             }
-            Inst::Mul(dst, src0, src1) => {
-                self.regs
-                    .set(dst, self.regs.get(src0).wrapping_mul(self.regs.get(src1)));
-            }
-            Inst::Not(dst) => {
-                self.regs.set(dst, !self.regs.get(dst));
-            }
-            Inst::Jump(ref dst) => {
-                self.ip = self.prog.labels[dst];
-                advance_ip = false;
-            }
-            Inst::JumpIfEqual(src0, src1, ref dst) => {
+            Inst::BranchIfEqual(src0, src1, ref dst) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a == b {
@@ -107,7 +96,7 @@ impl Cpu {
                     advance_ip = false;
                 }
             }
-            Inst::JumpIfNotEqual(src0, src1, ref dst) => {
+            Inst::BranchIfNotEqual(src0, src1, ref dst) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a != b {
@@ -116,6 +105,8 @@ impl Cpu {
                 }
             }
         }
+
+        self.cycles += 1;
 
         if advance_ip {
             self.ip += 1;

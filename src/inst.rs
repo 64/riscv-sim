@@ -39,7 +39,6 @@ pub enum ArchReg {
 
 #[derive(Debug, Clone)]
 pub enum Inst {
-    LoadImm(ArchReg, Imm),
     LoadByte(ArchReg, MemRef),
     LoadHalfWord(ArchReg, MemRef),
     LoadWord(ArchReg, MemRef),
@@ -48,12 +47,8 @@ pub enum Inst {
     StoreWord(MemRef, ArchReg),
     Add(ArchReg, ArchReg, ArchReg),
     AddImm(ArchReg, ArchReg, Imm),
-    Mul(ArchReg, ArchReg, ArchReg),
-    Not(ArchReg),
-    Jump(Label),
-    JumpIfEqual(ArchReg, ArchReg, Label),
-    JumpIfNotEqual(ArchReg, ArchReg, Label),
-    Nop,
+    BranchIfEqual(ArchReg, ArchReg, Label),
+    BranchIfNotEqual(ArchReg, ArchReg, Label),
 }
 
 impl FromStr for Inst {
@@ -75,21 +70,18 @@ impl FromStr for Inst {
         let label_arg = |n: usize| -> Result<Label, String> { Label::from_str(nth_arg(n)?) };
 
         let inst = match op.to_lowercase().as_str() {
-            "nop" => Inst::Nop,
-            "loadi" => Inst::LoadImm(reg_arg(0)?, imm_arg(1)?),
-            "loadb" => Inst::LoadByte(reg_arg(0)?, mem_arg(1)?),
-            "loadh" => Inst::LoadHalfWord(reg_arg(0)?, mem_arg(1)?),
-            "loadw" => Inst::LoadWord(reg_arg(0)?, mem_arg(1)?),
-            "storeb" => Inst::StoreByte(mem_arg(0)?, reg_arg(1)?),
-            "storeh" => Inst::StoreHalfWord(mem_arg(0)?, reg_arg(1)?),
-            "storew" => Inst::StoreWord(mem_arg(0)?, reg_arg(1)?),
+            "lb" => Inst::LoadByte(reg_arg(0)?, mem_arg(1)?),
+            "lh" => Inst::LoadHalfWord(reg_arg(0)?, mem_arg(1)?),
+            "lw" => Inst::LoadWord(reg_arg(0)?, mem_arg(1)?),
+            "sb" => Inst::StoreByte(mem_arg(0)?, reg_arg(1)?),
+            "sh" => Inst::StoreHalfWord(mem_arg(0)?, reg_arg(1)?),
+            "sw" => Inst::StoreWord(mem_arg(0)?, reg_arg(1)?),
             "add" => Inst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "addi" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
-            "mul" => Inst::Mul(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
-            "not" => Inst::Not(reg_arg(0)?),
-            "jmp" => Inst::Jump(label_arg(0)?),
-            "jeq" => Inst::JumpIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
-            "jne" => Inst::JumpIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "li" => Inst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
+            "nop" => Inst::AddImm(ArchReg::R0, ArchReg::R0, Imm(0)),
+            "beq" => Inst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "bne" => Inst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             _ => return Err(format!("unknown instruction: '{}'", op)),
         };
 

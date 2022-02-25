@@ -17,5 +17,6 @@ fn main() {
         .expect("failed to parse program");
 
     let cpu = cpu::Cpu::new(prog, HashMap::new(), Memory::new()).exec_all();
-    dbg!(cpu);
+    dbg!(&cpu);
+    println!("Finished executing in {} cycles.", cpu.cycles);
 }
