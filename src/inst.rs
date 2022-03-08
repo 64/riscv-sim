@@ -166,6 +166,12 @@ impl FromStr for MemRef {
     }
 }
 
+impl Default for ArchReg {
+    fn default() -> Self {
+        ArchReg::Zero
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

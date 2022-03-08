@@ -9,11 +9,11 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Emulated {
-    pub regs: RegSet,
-    pub mem: Memory,
-    pub prog: Program,
-    pub ip: u32,
-    pub cycles: u64,
+    regs: RegSet,
+    mem: Memory,
+    prog: Program,
+    pc: u32,
+    cycles: u64,
 }
 
 impl Cpu for Emulated {
@@ -22,7 +22,7 @@ impl Cpu for Emulated {
 
         Self {
             regs: RegSet::new(regs),
-            ip: 0,
+            pc: 0,
             cycles: 0,
             mem,
             prog,
@@ -46,12 +46,12 @@ impl Cpu for Emulated {
 
 impl Emulated {
     fn exec_one(&mut self) -> CpuState {
-        let next_inst = match self.prog.insts.get(usize::try_from(self.ip).unwrap()) {
+        let next_inst = match self.prog.fetch(self.pc) {
             Some(i) => i,
             None => return CpuState::Stopped,
         };
 
-        let mut advance_ip = true;
+        let mut advance_pc = true;
 
         match *next_inst {
             Inst::LoadByte(dst, src) => {
@@ -94,38 +94,38 @@ impl Emulated {
                 self.regs.set(dst, a.wrapping_shl(b));
             }
             Inst::JumpAndLink(dst, ref offset) => {
-                self.regs.set(dst, self.ip + 1);
-                self.ip += offset.0;
-                advance_ip = false;
+                self.regs.set(dst, self.pc + 1);
+                self.pc += offset.0;
+                advance_pc = false;
             }
             Inst::BranchIfEqual(src0, src1, ref dst) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a == b {
-                    self.ip = self.prog.labels[dst];
-                    advance_ip = false;
+                    self.pc = self.prog.labels[dst];
+                    advance_pc = false;
                 }
             }
             Inst::BranchIfNotEqual(src0, src1, ref dst) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a != b {
-                    self.ip = self.prog.labels[dst];
-                    advance_ip = false;
+                    self.pc = self.prog.labels[dst];
+                    advance_pc = false;
                 }
             }
             Inst::BranchIfGreaterEqual(src0, src1, ref dst) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a >= b {
-                    self.ip = self.prog.labels[dst];
-                    advance_ip = false;
+                    self.pc = self.prog.labels[dst];
+                    advance_pc = false;
                 }
             }
         }
 
-        if advance_ip {
-            self.ip += 1;
+        if advance_pc {
+            self.pc += 1;
         }
 
         self.cycles += 1;

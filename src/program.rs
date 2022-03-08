@@ -45,3 +45,9 @@ impl FromStr for Program {
         Ok(Program { insts, labels })
     }
 }
+
+impl Program {
+    pub fn fetch(&self, ip: u32) -> Option<&Inst> {
+        self.insts.get(usize::try_from(ip).unwrap())
+    }
+}

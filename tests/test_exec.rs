@@ -1,4 +1,7 @@
-use aca::{cpu::Cpu, emulated::Emulated, inst::ArchReg, mem::Memory, program::Program, util::Addr};
+use aca::{
+    cpu::Cpu, emulated::Emulated, inst::ArchReg, mem::Memory, pipelined::Pipelined,
+    program::Program, util::Addr,
+};
 use std::collections::HashMap;
 
 #[generic_tests::define]
@@ -29,6 +32,19 @@ mod t {
 
         for i in 0..10 {
             assert_eq!(res.mem.readw(Addr(i * 4)), 10);
+        }
+    }
+
+    #[test]
+    fn test_label<C: Cpu>() {
+        let contents = std::fs::read_to_string("asm/label.asm").unwrap();
+        let prog = contents
+            .parse::<Program>()
+            .expect("failed to parse asm/label.asm");
+
+        let res = C::new(prog, HashMap::new(), Memory::new()).exec_all();
+        for i in 0..10 {
+            assert_eq!(res.mem.readw(Addr(i * 4)), 0);
         }
     }
 
