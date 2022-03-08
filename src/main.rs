@@ -1,8 +1,13 @@
 mod cpu;
+mod emulated;
 mod inst;
+mod mem;
+mod pipelined;
 mod program;
+mod regs;
+mod util;
 
-use crate::cpu::Memory;
+use crate::{cpu::Cpu, mem::Memory};
 use std::collections::HashMap;
 
 fn main() {
@@ -16,7 +21,7 @@ fn main() {
         .parse::<program::Program>()
         .expect("failed to parse program");
 
-    let cpu = cpu::Cpu::new(prog, HashMap::new(), Memory::new()).exec_all();
-    dbg!(&cpu);
-    println!("Finished executing in {} cycles.", cpu.cycles);
+    let res = emulated::Emulated::new(prog, HashMap::new(), Memory::new()).exec_all();
+    dbg!(&res);
+    println!("Finished executing in {} cycles.", res.cycles_taken);
 }

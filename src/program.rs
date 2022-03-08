@@ -33,7 +33,11 @@ impl FromStr for Program {
             } else {
                 match Inst::from_str(line) {
                     Ok(inst) => insts.push(inst),
-                    Err(e) => return Err(format!("error parsing instruction '{line}' on line {i}: {e}")),
+                    Err(e) => {
+                        return Err(format!(
+                            "error parsing instruction '{line}' on line {i}: {e}"
+                        ))
+                    }
                 }
             }
         }

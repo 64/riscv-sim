@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 strum = { version = "0.24", features = ["derive"] }
+
+[dev-dependencies]
+generic-tests = "0.1.2"

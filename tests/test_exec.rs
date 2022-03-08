@@ -1,28 +1,40 @@
-use aca::{
-    cpu::{Addr, Cpu, Memory},
-    inst::ArchReg,
-    program::Program,
-};
+use aca::{cpu::Cpu, emulated::Emulated, inst::ArchReg, mem::Memory, program::Program, util::Addr};
 use std::collections::HashMap;
 
-#[test]
-fn test_loop() {
-    let contents = std::fs::read_to_string("asm/loop.asm").unwrap();
-    let prog = contents
-        .parse::<Program>()
-        .expect("failed to parse asm/loop.asm");
+#[generic_tests::define]
+mod t {
+    use super::*;
 
-    let initial_regs = HashMap::from([(ArchReg::A0, 0), (ArchReg::A1, 40), (ArchReg::A2, 80), (ArchReg::A3, 10)]);
+    #[test]
+    fn test_loop<C: Cpu>() {
+        let contents = std::fs::read_to_string("asm/loop.asm").unwrap();
+        let prog = contents
+            .parse::<Program>()
+            .expect("failed to parse asm/loop.asm");
 
-    let mut initial_mem = Memory::new();
-    for i in 0..10 {
-        initial_mem.writew(Addr(40 + i * 4), i);
-        initial_mem.writew(Addr(80 + i * 4), 10 - i);
+        let initial_regs = HashMap::from([
+            (ArchReg::A0, 0),
+            (ArchReg::A1, 40),
+            (ArchReg::A2, 80),
+            (ArchReg::A3, 10),
+        ]);
+
+        let mut initial_mem = Memory::new();
+        for i in 0..10 {
+            initial_mem.writew(Addr(40 + i * 4), i);
+            initial_mem.writew(Addr(80 + i * 4), 10 - i);
+        }
+
+        let res = C::new(prog, initial_regs, initial_mem).exec_all();
+
+        for i in 0..10 {
+            assert_eq!(res.mem.readw(Addr(i * 4)), 10);
+        }
     }
 
-    let cpu = Cpu::new(prog, initial_regs, initial_mem).exec_all();
+    #[instantiate_tests(<Emulated>)]
+    mod emulated {}
 
-    for i in 0..10 {
-        assert_eq!(cpu.mem.readw(Addr(i * 4)), 10);
-    }
+    // #[instantiate_tests(<Pipelined>)]
+    // mod pipelined {}
 }
