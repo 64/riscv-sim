@@ -21,7 +21,13 @@ fn main() {
         .parse::<program::Program>()
         .expect("failed to parse program");
 
-    let res = emulated::Emulated::new(prog, HashMap::new(), Memory::new()).exec_all();
+    // let res = emulated::Emulated::new(prog, HashMap::new(), Memory::new()).exec_all();
+    let res = pipelined::Pipelined::new(prog, HashMap::new(), Memory::new()).exec_all();
     dbg!(&res);
-    println!("Finished executing in {} cycles.", res.cycles_taken);
+    println!(
+        "Finished executing {} instructions in {} cycles (IPC = {})",
+        res.insts_retired,
+        res.cycles_taken,
+        res.insts_retired as f32 / res.cycles_taken as f32
+    );
 }

@@ -54,6 +54,7 @@ pub enum Inst {
     BranchIfEqual(ArchReg, ArchReg, Label),
     BranchIfNotEqual(ArchReg, ArchReg, Label),
     BranchIfGreaterEqual(ArchReg, ArchReg, Label),
+    Halt, // Used internally when execution finishes.
 }
 
 impl FromStr for Inst {
@@ -87,17 +88,23 @@ impl FromStr for Inst {
             "addi" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "slli" => Inst::ShiftLeftLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "li" => Inst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
-            "nop" => Inst::AddImm(ArchReg::Zero, ArchReg::Zero, Imm(0)),
             "jal" => Inst::JumpAndLink(reg_arg(0)?, imm_arg(1)?),
             "beq" => Inst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bne" => Inst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bge" => Inst::BranchIfGreaterEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "ble" => Inst::BranchIfGreaterEqual(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
+            "nop" => Inst::nop(),
             "ret" => todo!(),
             _ => return Err(format!("unknown instruction: '{}'", op)),
         };
 
         Ok(inst)
+    }
+}
+
+impl Inst {
+    pub fn nop() -> Self {
+        Inst::AddImm(ArchReg::Zero, ArchReg::Zero, Imm(0))
     }
 }
 

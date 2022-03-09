@@ -11,6 +11,7 @@ pub enum CpuState {
 pub struct ExecResult {
     pub mem: Memory,
     pub cycles_taken: u64,
+    pub insts_retired: u64,
 }
 
 pub trait Cpu {

@@ -40,6 +40,7 @@ impl Cpu for Emulated {
         ExecResult {
             mem: self.mem,
             cycles_taken: self.cycles,
+            insts_retired: self.cycles,
         }
     }
 }
@@ -122,6 +123,7 @@ impl Emulated {
                     advance_pc = false;
                 }
             }
+            Inst::Halt => unreachable!(),
         }
 
         if advance_pc {
