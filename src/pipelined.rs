@@ -150,16 +150,9 @@ impl Pipelined {
             None => return Default::default(),
         };
 
-        let should_stall = match inst {
-            Inst::BranchIfNotEqual(_, _, _)
-            | Inst::BranchIfEqual(_, _, _)
-            | Inst::BranchIfGreaterEqual(_, _, _) => true,
-            _ => false,
-        };
-
         stages::Decode {
+            should_stall: inst.is_branch(),
             inst: Some(inst),
-            should_stall,
         }
     }
 

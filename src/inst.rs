@@ -106,6 +106,25 @@ impl Inst {
     pub fn nop() -> Self {
         Inst::AddImm(ArchReg::Zero, ArchReg::Zero, Imm(0))
     }
+
+    pub fn is_branch(&self) -> bool {
+        match self {
+            Inst::JumpAndLink(_, _)
+            | Inst::BranchIfNotEqual(_, _, _)
+            | Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _) => true,
+            Inst::LoadByte(_, _)
+            | Inst::LoadHalfWord(_, _)
+            | Inst::LoadWord(_, _)
+            | Inst::StoreByte(_, _)
+            | Inst::StoreHalfWord(_, _)
+            | Inst::StoreWord(_, _)
+            | Inst::Add(_, _, _)
+            | Inst::AddImm(_, _, _)
+            | Inst::ShiftLeftLogicalImm(_, _, _)
+            | Inst::Halt => false,
+        }
+    }
 }
 
 impl FromStr for Imm {
