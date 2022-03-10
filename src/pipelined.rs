@@ -31,7 +31,7 @@ mod stages {
 
     #[derive(Debug, Default)]
     pub struct MemWb {
-        pub resume_pipe: bool,
+        pub jump_target: Option<u32>,
         pub should_halt: bool,
         pub retire: bool,
     }
@@ -42,6 +42,13 @@ struct Pipeline {
     fetch: stages::Fetch,
     decode: stages::Decode,
     ex_mem: stages::ExMem,
+    mem_wb: stages::MemWb,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PcMode {
+    Inc,
+    Stalled,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +56,7 @@ pub struct Pipelined {
     regs: RegSet,
     mem: Memory,
     prog: Program,
-    pc: u32,
+    pc_mode: PcMode,
 }
 
 impl Cpu for Pipelined {
@@ -58,7 +65,7 @@ impl Cpu for Pipelined {
 
         Self {
             regs: RegSet::new(regs),
-            pc: 0,
+            pc_mode: PcMode::Inc,
             mem,
             prog,
         }
@@ -68,36 +75,22 @@ impl Cpu for Pipelined {
         let mut cycles = 0;
         let mut insts_retired = 0;
         let mut pipe = Pipeline::default();
-        let mut stalled = false;
 
         loop {
-            let fetch = self.stage_fetch(&pipe);
+            let mut fetch = self.stage_fetch(&pipe);
             let decode = self.stage_decode(&pipe);
             let ex_mem = self.stage_ex_mem(&pipe);
             let mem_wb = self.stage_mem_wb(&pipe);
 
             if decode.should_stall {
-                stalled = true;
-            }
+                self.pc_mode = PcMode::Stalled;
 
-            pipe = Pipeline {
-                fetch: stages::Fetch {
-                    inst: if stalled { None } else { fetch.inst },
-                    new_pc: if mem_wb.resume_pipe {
-                        self.pc
-                    } else if stalled {
-                        pipe.fetch.new_pc
-                    } else {
-                        fetch.new_pc
-                    },
-                },
-                decode,
-                ex_mem,
-            };
-            dbg!(&pipe, &mem_wb);
-
-            if mem_wb.resume_pipe {
-                stalled = false;
+                // Flush. Need to decrement new_pc since it was incremented after
+                // fetching the branch which caused the stall.
+                fetch = stages::Fetch {
+                    inst: None,
+                    new_pc: pipe.fetch.new_pc - 1,
+                };
             }
 
             if mem_wb.should_halt {
@@ -112,6 +105,14 @@ impl Cpu for Pipelined {
                 insts_retired += 1;
             }
 
+            pipe = Pipeline {
+                fetch,
+                decode,
+                ex_mem,
+                mem_wb,
+            };
+            dbg!(&pipe);
+
             cycles += 1;
             // debug_assert!(cycles < 10, "infinite loop detected");
             debug_assert!(cycles < 1_000, "infinite loop detected");
@@ -121,11 +122,25 @@ impl Cpu for Pipelined {
 
 impl Pipelined {
     fn stage_fetch(&mut self, pipe: &Pipeline) -> stages::Fetch {
-        let pc = pipe.fetch.new_pc;
-        let inst = self.prog.fetch(pc).cloned();
-        stages::Fetch {
-            inst: Some(inst.unwrap_or(Inst::Halt)),
-            new_pc: pc + 1,
+        let cur_pc = pipe.fetch.new_pc;
+        let fetch_or_halt = |pc| self.prog.fetch(pc).cloned().unwrap_or(Inst::Halt);
+
+        match (pipe.mem_wb.jump_target, &self.pc_mode) {
+            (Some(tgt), _) => {
+                self.pc_mode = PcMode::Inc;
+                stages::Fetch {
+                    inst: Some(fetch_or_halt(tgt)),
+                    new_pc: tgt + 1,
+                }
+            }
+            (None, PcMode::Stalled) => stages::Fetch {
+                inst: None,
+                new_pc: cur_pc,
+            },
+            (None, PcMode::Inc) => stages::Fetch {
+                inst: Some(fetch_or_halt(cur_pc)),
+                new_pc: cur_pc + 1,
+            }
         }
     }
 
@@ -211,7 +226,7 @@ impl Pipelined {
         let inst = match &pipe.ex_mem.inst {
             Some(Inst::Halt) => {
                 return stages::MemWb {
-                    resume_pipe: false,
+                    jump_target: None,
                     should_halt: true,
                     retire: false,
                 }
@@ -219,15 +234,14 @@ impl Pipelined {
             Some(inst) => inst.clone(),
             None => {
                 return stages::MemWb {
-                    resume_pipe: false,
+                    jump_target: None,
                     should_halt: false,
                     retire: false,
                 }
             }
         };
 
-        let mut advance_pc = true;
-        let mut resume_pipe = false;
+        let mut jump_target = None;
 
         match inst {
             Inst::StoreByte(_, dst) => {
@@ -253,21 +267,17 @@ impl Pipelined {
             Inst::BranchIfNotEqual(_, _, ref dst)
             | Inst::BranchIfEqual(_, _, ref dst)
             | Inst::BranchIfGreaterEqual(_, _, ref dst) => {
-                resume_pipe = true;
-                if pipe.ex_mem.alu != 0 {
-                    self.pc = self.prog.labels[dst];
-                    advance_pc = false;
-                }
+                jump_target = if pipe.ex_mem.alu != 0 {
+                    Some(self.prog.labels[dst])
+                } else {
+                    Some(pipe.fetch.new_pc + 1)
+                };
             }
             _ => unimplemented!("{:?}", inst),
         }
 
-        if advance_pc {
-            self.pc += 1;
-        }
-
         stages::MemWb {
-            resume_pipe,
+            jump_target,
             should_halt: false,
             retire: true,
         }

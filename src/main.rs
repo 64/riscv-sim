@@ -8,9 +8,11 @@ mod regs;
 mod util;
 
 use crate::{cpu::Cpu, mem::Memory};
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Instant};
 
 fn main() {
+    let start = Instant::now();
+
     let file = std::env::args()
         .nth(1)
         .expect("required input file as argument argument");
@@ -24,10 +26,11 @@ fn main() {
     // let res = emulated::Emulated::new(prog, HashMap::new(), Memory::new()).exec_all();
     let res = pipelined::Pipelined::new(prog, HashMap::new(), Memory::new()).exec_all();
     dbg!(&res);
-    println!(
-        "Finished executing {} instructions in {} cycles (IPC = {})",
-        res.insts_retired,
-        res.cycles_taken,
-        res.insts_retired as f32 / res.cycles_taken as f32
-    );
+
+    println!("    EXECUTION COMPLETED");
+    println!("    =====================");
+    println!("    Instructions retired: {}", res.insts_retired);
+    println!("            Cycles taken: {}", res.cycles_taken);
+    println!("  Instructions per clock: {:.2}", res.insts_retired as f32 / res.cycles_taken as f32);
+    println!("  Simulator time elapsed: {:.2}s", start.elapsed().as_secs_f32());
 }
