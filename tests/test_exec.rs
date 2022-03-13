@@ -63,6 +63,28 @@ mod t {
         assert_eq!(res.mem.readw(Addr(8)), 2);
     }
 
+    #[test]
+    fn test_hazard_raw<C: Cpu>() {
+        let res = parse_and_exec::<C>("hazard_raw", HashMap::new(), Memory::new());
+        assert_eq!(res.mem.readw(Addr(0)), 3);
+        assert_eq!(res.mem.readw(Addr(4)), 1);
+        assert_eq!(res.mem.readw(Addr(8)), 1);
+    }
+
+    #[test]
+    fn test_hazard_war<C: Cpu>() {
+        let res = parse_and_exec::<C>("hazard_war", HashMap::new(), Memory::new());
+        assert_eq!(res.mem.readw(Addr(0)), 1);
+        assert_eq!(res.mem.readw(Addr(4)), 2);
+    }
+
+    #[test]
+    fn test_hazard_waw<C: Cpu>() {
+        let res = parse_and_exec::<C>("hazard_waw", HashMap::new(), Memory::new());
+        assert_eq!(res.mem.readw(Addr(0)), 2);
+        assert_eq!(res.mem.readw(Addr(4)), 2);
+    }
+
     #[instantiate_tests(<Emulated>)]
     mod emulated {}
 

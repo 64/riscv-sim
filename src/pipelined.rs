@@ -1,19 +1,22 @@
 use crate::{
     cpu::{Cpu, ExecResult},
+    hazard,
     inst::{ArchReg, Inst},
     mem::Memory,
     program::Program,
     regs::RegSet,
+    util::Addr,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, default::Default};
 
 mod stages {
+
     use super::*;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, Clone)]
     pub struct Fetch {
         pub inst: Option<Inst>,
-        pub new_pc: u32,
+        pub next_pc: u32,
     }
 
     #[derive(Debug, Default)]
@@ -23,14 +26,21 @@ mod stages {
     }
 
     #[derive(Debug, Default)]
-    pub struct ExMem {
+    pub struct Execute {
         pub inst: Option<Inst>,
-        pub alu: u32,
-        pub mem: u32,
+        pub should_stall: bool,
+        pub alu_or_mem_val: u32,
+        pub mem_addr: Addr,
     }
 
     #[derive(Debug, Default)]
-    pub struct MemWb {
+    pub struct Memory {
+        pub inst: Option<Inst>,
+        pub alu_or_mem_val: u32,
+    }
+
+    #[derive(Debug, Default)]
+    pub struct Writeback {
         pub jump_target: Option<u32>,
         pub should_halt: bool,
         pub retire: bool,
@@ -41,14 +51,9 @@ mod stages {
 struct Pipeline {
     fetch: stages::Fetch,
     decode: stages::Decode,
-    ex_mem: stages::ExMem,
-    mem_wb: stages::MemWb,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PcMode {
-    Inc,
-    Stalled,
+    execute: stages::Execute,
+    memory: stages::Memory,
+    writeback: stages::Writeback,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +61,7 @@ pub struct Pipelined {
     regs: RegSet,
     mem: Memory,
     prog: Program,
-    pc_mode: PcMode,
+    is_stalled: bool,
 }
 
 impl Cpu for Pipelined {
@@ -65,7 +70,7 @@ impl Cpu for Pipelined {
 
         Self {
             regs: RegSet::new(regs),
-            pc_mode: PcMode::Inc,
+            is_stalled: false,
             mem,
             prog,
         }
@@ -77,23 +82,13 @@ impl Cpu for Pipelined {
         let mut pipe = Pipeline::default();
 
         loop {
-            let mut fetch = self.stage_fetch(&pipe);
+            let fetch = self.stage_fetch(&pipe);
             let decode = self.stage_decode(&pipe);
-            let ex_mem = self.stage_ex_mem(&pipe);
-            let mem_wb = self.stage_mem_wb(&pipe);
+            let execute = self.stage_execute(&pipe);
+            let writeback = self.stage_writeback(&pipe);
+            let memory = self.stage_memory(&pipe);
 
-            if decode.should_stall {
-                self.pc_mode = PcMode::Stalled;
-
-                // Flush. Need to decrement new_pc since it was incremented after
-                // fetching the branch which caused the stall.
-                fetch = stages::Fetch {
-                    inst: None,
-                    new_pc: pipe.fetch.new_pc - 1,
-                };
-            }
-
-            if mem_wb.should_halt {
+            if writeback.should_halt {
                 return ExecResult {
                     mem: self.mem,
                     cycles_taken: cycles,
@@ -101,111 +96,148 @@ impl Cpu for Pipelined {
                 };
             }
 
-            if mem_wb.retire {
+            if writeback.retire {
                 insts_retired += 1;
             }
 
-            pipe = Pipeline {
-                fetch,
-                decode,
-                ex_mem,
-                mem_wb,
-            };
+            if execute.should_stall {
+                pipe = Pipeline {
+                    fetch: pipe.fetch,
+                    decode: pipe.decode,
+                    execute,
+                    memory,
+                    writeback,
+                };
+            } else if decode.should_stall {
+                self.is_stalled = true;
+                pipe = Pipeline {
+                    fetch: stages::Fetch {
+                        inst: None,
+                        next_pc: pipe.fetch.next_pc,
+                    },
+                    decode,
+                    execute,
+                    memory,
+                    writeback,
+                };
+            } else {
+                pipe = Pipeline {
+                    fetch,
+                    decode,
+                    execute,
+                    memory,
+                    writeback,
+                };
+            }
             dbg!(&pipe);
 
             cycles += 1;
             // debug_assert!(cycles < 10, "infinite loop detected");
             debug_assert!(cycles < 1_000, "infinite loop detected");
+
+            if std::env::var("SINGLE_STEP").is_ok() {
+                std::io::stdin().read_line(&mut String::new()).unwrap();
+            }
         }
     }
 }
 
 impl Pipelined {
     fn stage_fetch(&mut self, pipe: &Pipeline) -> stages::Fetch {
-        let cur_pc = pipe.fetch.new_pc;
         let fetch_or_halt = |pc| self.prog.fetch(pc).cloned().unwrap_or(Inst::Halt);
 
-        match (pipe.mem_wb.jump_target, &self.pc_mode) {
-            (Some(tgt), _) => {
-                self.pc_mode = PcMode::Inc;
-                stages::Fetch {
-                    inst: Some(fetch_or_halt(tgt)),
-                    new_pc: tgt + 1,
-                }
+        if let Some(tgt) = pipe.writeback.jump_target {
+            debug_assert!(self.is_stalled);
+            self.is_stalled = false;
+            stages::Fetch {
+                inst: Some(fetch_or_halt(tgt)),
+                next_pc: tgt + 1,
             }
-            (None, PcMode::Stalled) => stages::Fetch {
-                inst: None,
-                new_pc: cur_pc,
-            },
-            (None, PcMode::Inc) => stages::Fetch {
-                inst: Some(fetch_or_halt(cur_pc)),
-                new_pc: cur_pc + 1,
+        } else if self.is_stalled {
+            pipe.fetch.clone()
+        } else {
+            stages::Fetch {
+                inst: Some(fetch_or_halt(pipe.fetch.next_pc)),
+                next_pc: pipe.fetch.next_pc + 1,
             }
         }
     }
 
-    fn stage_decode(&mut self, pipe: &Pipeline) -> stages::Decode {
+    fn stage_decode(&self, pipe: &Pipeline) -> stages::Decode {
         let inst = match &pipe.fetch.inst {
             Some(inst) => inst.clone(),
             None => return Default::default(),
         };
 
-        stages::Decode {
-            should_stall: inst.is_branch(),
-            inst: Some(inst),
+        if inst.is_branch() {
+            stages::Decode {
+                should_stall: true,
+                inst: Some(inst),
+            }
+        } else {
+            stages::Decode {
+                should_stall: false,
+                inst: Some(inst),
+            }
         }
     }
 
-    fn stage_ex_mem(&mut self, pipe: &Pipeline) -> stages::ExMem {
+    fn stage_execute(&self, pipe: &Pipeline) -> stages::Execute {
+        if hazard::read_after_write(&pipe.decode.inst, &pipe.execute.inst)
+            || hazard::read_after_write(&pipe.decode.inst, &pipe.memory.inst)
+        {
+            return stages::Execute {
+                should_stall: true,
+                ..Default::default()
+            };
+        }
+
         let inst = match &pipe.decode.inst {
             Some(inst) => inst.clone(),
             None => return Default::default(),
         };
 
-        let mut out = stages::ExMem::default();
+        let mut out = stages::Execute::default();
 
         match inst {
-            Inst::StoreByte(src, _) | Inst::StoreHalfWord(src, _) | Inst::StoreWord(src, _) => {
-                out.mem = self.regs.get(src)
-            }
-            Inst::LoadByte(_, src) => {
-                out.mem = self.mem.readb(self.regs.ref_to_addr(src));
-            }
-            Inst::LoadHalfWord(_, src) => {
-                out.mem = self.mem.readh(self.regs.ref_to_addr(src));
-            }
-            Inst::LoadWord(_, src) => {
-                out.mem = self.mem.readw(self.regs.ref_to_addr(src));
-            }
             Inst::Add(_, src0, src1) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
-                out.alu = a.wrapping_add(b);
+                out.alu_or_mem_val = a.wrapping_add(b);
             }
             Inst::AddImm(_, src, imm) => {
                 let a = self.regs.get(src);
                 let b = imm.0;
-                out.alu = a.wrapping_add(b);
+                out.alu_or_mem_val = a.wrapping_add(b);
             }
             Inst::ShiftLeftLogicalImm(_, src, imm) => {
                 let a = self.regs.get(src);
                 let b = imm.0;
-                out.alu = a.wrapping_shl(b);
+                out.alu_or_mem_val = a.wrapping_shl(b);
             }
             Inst::BranchIfEqual(src0, src1, _) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
-                out.alu = (a == b).into();
+                out.alu_or_mem_val = (a == b).into();
             }
             Inst::BranchIfNotEqual(src0, src1, _) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
-                out.alu = (a != b).into();
+                out.alu_or_mem_val = (a != b).into();
             }
             Inst::BranchIfGreaterEqual(src0, src1, _) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
-                out.alu = (a >= b).into();
+                out.alu_or_mem_val = (a >= b).into();
+            }
+            Inst::LoadByte(_, addr) | Inst::LoadHalfWord(_, addr) | Inst::LoadWord(_, addr) => {
+                out.mem_addr = self.regs.ref_to_addr(addr);
+            }
+            Inst::StoreByte(src, dst)
+            | Inst::StoreHalfWord(src, dst)
+            | Inst::StoreWord(src, dst) => {
+                out.mem_addr = self.regs.ref_to_addr(dst);
+                out.alu_or_mem_val = self.regs.get(src);
             }
             Inst::Halt => (),
             _ => unimplemented!("{:?}", inst),
@@ -215,10 +247,50 @@ impl Pipelined {
         out
     }
 
-    fn stage_mem_wb(&mut self, pipe: &Pipeline) -> stages::MemWb {
-        let inst = match &pipe.ex_mem.inst {
+    fn stage_memory(&mut self, pipe: &Pipeline) -> stages::Memory {
+        let inst = match &pipe.execute.inst {
+            Some(inst) => inst.clone(),
+            None => return Default::default(),
+        };
+
+        let addr = pipe.execute.mem_addr;
+        let mut val = pipe.execute.alu_or_mem_val;
+
+        match inst {
+            Inst::LoadByte(_, _) => {
+                val = self.mem.readb(addr);
+            }
+            Inst::LoadHalfWord(_, _) => {
+                val = self.mem.readh(addr);
+            }
+            Inst::LoadWord(_, _) => {
+                val = self.mem.readw(addr);
+            }
+            Inst::StoreByte(_, _) => {
+                eprintln!("writing {} to {:?}", val, addr);
+                self.mem.writeb(addr, val);
+            }
+            Inst::StoreHalfWord(_, _) => {
+                eprintln!("writing {} to {:?}", val, addr);
+                self.mem.writeh(addr, val);
+            }
+            Inst::StoreWord(_, _) => {
+                eprintln!("writing {} to {:?}", val, addr);
+                self.mem.writew(addr, val);
+            }
+            ref x => debug_assert!(!x.is_memory_access()),
+        }
+
+        stages::Memory {
+            inst: Some(inst),
+            alu_or_mem_val: val,
+        }
+    }
+
+    fn stage_writeback(&mut self, pipe: &Pipeline) -> stages::Writeback {
+        let inst = match &pipe.memory.inst {
             Some(Inst::Halt) => {
-                return stages::MemWb {
+                return stages::Writeback {
                     jump_target: None,
                     should_halt: true,
                     retire: false,
@@ -226,7 +298,7 @@ impl Pipelined {
             }
             Some(inst) => inst.clone(),
             None => {
-                return stages::MemWb {
+                return stages::Writeback {
                     jump_target: None,
                     should_halt: false,
                     retire: false,
@@ -234,42 +306,34 @@ impl Pipelined {
             }
         };
 
+        let val = pipe.memory.alu_or_mem_val;
         let mut jump_target = None;
 
         match inst {
-            Inst::StoreByte(_, dst) => {
-                let dst = self.regs.ref_to_addr(dst);
-                self.mem.writeb(dst, pipe.ex_mem.mem);
-            }
-            Inst::StoreHalfWord(_, dst) => {
-                let dst = self.regs.ref_to_addr(dst);
-                self.mem.writeh(dst, pipe.ex_mem.mem);
-            }
-            Inst::StoreWord(_, dst) => {
-                let dst = self.regs.ref_to_addr(dst);
-                self.mem.writew(dst, pipe.ex_mem.mem);
-            }
-            Inst::LoadByte(dst, _) | Inst::LoadHalfWord(dst, _) | Inst::LoadWord(dst, _) => {
-                self.regs.set(dst, pipe.ex_mem.mem);
-            }
             Inst::ShiftLeftLogicalImm(dst, _, _)
+            | Inst::LoadByte(dst, _)
+            | Inst::LoadHalfWord(dst, _)
+            | Inst::LoadWord(dst, _)
             | Inst::Add(dst, _, _)
             | Inst::AddImm(dst, _, _) => {
-                self.regs.set(dst, pipe.ex_mem.alu);
+                self.regs.set(dst, val);
+                eprintln!("writing back {} to {:?}", val, dst);
             }
             Inst::BranchIfNotEqual(_, _, ref dst)
             | Inst::BranchIfEqual(_, _, ref dst)
             | Inst::BranchIfGreaterEqual(_, _, ref dst) => {
-                jump_target = if pipe.ex_mem.alu != 0 {
+                jump_target = if val != 0 {
                     Some(self.prog.labels[dst])
                 } else {
-                    Some(pipe.fetch.new_pc + 1)
+                    Some(pipe.fetch.next_pc)
                 };
             }
+            // The other memory accesses are handled in the previous pipeline stage
+            x if x.is_memory_access() => (),
             _ => unimplemented!("{:?}", inst),
         }
 
-        stages::MemWb {
+        stages::Writeback {
             jump_target,
             should_halt: false,
             retire: true,

@@ -1,5 +1,6 @@
 pub mod cpu;
 pub mod emulated;
+pub mod hazard;
 pub mod inst;
 pub mod mem;
 pub mod pipelined;

@@ -88,6 +88,7 @@ impl FromStr for Inst {
             "addi" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "slli" => Inst::ShiftLeftLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "li" => Inst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
+            "mv" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, Imm(0)),
             "jal" => Inst::JumpAndLink(reg_arg(0)?, imm_arg(1)?),
             "beq" => Inst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bne" => Inst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
@@ -122,6 +123,67 @@ impl Inst {
             | Inst::Add(_, _, _)
             | Inst::AddImm(_, _, _)
             | Inst::ShiftLeftLogicalImm(_, _, _)
+            | Inst::Halt => false,
+        }
+    }
+
+    pub fn is_memory_access(&self) -> bool {
+        match self {
+            Inst::LoadByte(_, _)
+            | Inst::LoadHalfWord(_, _)
+            | Inst::LoadWord(_, _)
+            | Inst::StoreByte(_, _)
+            | Inst::StoreHalfWord(_, _)
+            | Inst::StoreWord(_, _) => true,
+            Inst::JumpAndLink(_, _)
+            | Inst::BranchIfNotEqual(_, _, _)
+            | Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _)
+            | Inst::Add(_, _, _)
+            | Inst::AddImm(_, _, _)
+            | Inst::ShiftLeftLogicalImm(_, _, _)
+            | Inst::Halt => false,
+        }
+    }
+
+    pub fn is_alu(&self) -> bool {
+        match self {
+            Inst::JumpAndLink(_, _)
+            | Inst::BranchIfNotEqual(_, _, _)
+            | Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _)
+            | Inst::Add(_, _, _)
+            | Inst::AddImm(_, _, _)
+            | Inst::ShiftLeftLogicalImm(_, _, _) => true,
+            Inst::LoadByte(_, _)
+            | Inst::LoadHalfWord(_, _)
+            | Inst::LoadWord(_, _)
+            | Inst::StoreByte(_, _)
+            | Inst::StoreHalfWord(_, _)
+            | Inst::StoreWord(_, _)
+            | Inst::Halt => false,
+        }
+    }
+
+    pub fn writes_reg(&self, reg: ArchReg) -> bool {
+        if reg == ArchReg::Zero {
+            return false;
+        }
+
+        match self {
+            Inst::Add(dst, _, _)
+            | Inst::AddImm(dst, _, _)
+            | Inst::ShiftLeftLogicalImm(dst, _, _)
+            | Inst::LoadByte(dst, _)
+            | Inst::LoadHalfWord(dst, _)
+            | Inst::LoadWord(dst, _)
+            | Inst::JumpAndLink(dst, _) => *dst == reg,
+            Inst::BranchIfNotEqual(_, _, _)
+            | Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _)
+            | Inst::StoreByte(_, _)
+            | Inst::StoreHalfWord(_, _)
+            | Inst::StoreWord(_, _)
             | Inst::Halt => false,
         }
     }

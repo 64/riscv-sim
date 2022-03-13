@@ -1,5 +1,6 @@
 mod cpu;
 mod emulated;
+mod hazard;
 mod inst;
 mod mem;
 mod pipelined;
@@ -31,6 +32,12 @@ fn main() {
     println!("    =====================");
     println!("    Instructions retired: {}", res.insts_retired);
     println!("            Cycles taken: {}", res.cycles_taken);
-    println!("  Instructions per clock: {:.2}", res.insts_retired as f32 / res.cycles_taken as f32);
-    println!("  Simulator time elapsed: {:.2}s", start.elapsed().as_secs_f32());
+    println!(
+        "  Instructions per clock: {:.2}",
+        res.insts_retired as f32 / res.cycles_taken as f32
+    );
+    println!(
+        "  Simulator time elapsed: {:.2}s",
+        start.elapsed().as_secs_f32()
+    );
 }
