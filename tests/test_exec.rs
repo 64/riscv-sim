@@ -3,6 +3,7 @@ use aca::{
     emulated::Emulated,
     inst::ArchReg,
     mem::Memory,
+    out_of_order::OutOfOrder,
     pipelined::Pipelined,
     program::Program,
     util::Addr,
@@ -90,4 +91,7 @@ mod t {
 
     #[instantiate_tests(<Pipelined>)]
     mod pipelined {}
+
+    // #[instantiate_tests(<OutOfOrder>)]
+    // mod out_of_order {}
 }

@@ -3,6 +3,7 @@ pub mod emulated;
 pub mod hazard;
 pub mod inst;
 pub mod mem;
+pub mod out_of_order;
 pub mod pipelined;
 pub mod program;
 pub mod regs;

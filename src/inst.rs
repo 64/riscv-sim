@@ -40,20 +40,20 @@ pub enum ArchReg {
 // https://mark.theis.site/riscv/
 // https://web.eecs.utk.edu/~smarz1/courses/ece356/notes/assembly/
 #[derive(Debug, Clone)]
-pub enum Inst {
-    LoadByte(ArchReg, MemRef),
-    LoadHalfWord(ArchReg, MemRef),
-    LoadWord(ArchReg, MemRef),
-    StoreByte(ArchReg, MemRef),
-    StoreHalfWord(ArchReg, MemRef),
-    StoreWord(ArchReg, MemRef),
-    Add(ArchReg, ArchReg, ArchReg),
-    AddImm(ArchReg, ArchReg, Imm),
-    ShiftLeftLogicalImm(ArchReg, ArchReg, Imm),
-    JumpAndLink(ArchReg, Imm),
-    BranchIfEqual(ArchReg, ArchReg, Label),
-    BranchIfNotEqual(ArchReg, ArchReg, Label),
-    BranchIfGreaterEqual(ArchReg, ArchReg, Label),
+pub enum Inst<RegType: Clone + PartialEq + Eq = ArchReg> {
+    LoadByte(RegType, MemRef),
+    LoadHalfWord(RegType, MemRef),
+    LoadWord(RegType, MemRef),
+    StoreByte(RegType, MemRef),
+    StoreHalfWord(RegType, MemRef),
+    StoreWord(RegType, MemRef),
+    Add(RegType,RegType,RegType),
+    AddImm(RegType,RegType, Imm),
+    ShiftLeftLogicalImm(RegType,RegType, Imm),
+    JumpAndLink(RegType, Imm),
+    BranchIfEqual(RegType,RegType, Label),
+    BranchIfNotEqual(RegType,RegType, Label),
+    BranchIfGreaterEqual(RegType, RegType, Label),
     Halt, // Used internally when execution finishes.
 }
 
@@ -108,6 +108,31 @@ impl Inst {
         Inst::AddImm(ArchReg::Zero, ArchReg::Zero, Imm(0))
     }
 
+    pub fn writes_reg(&self, reg: ArchReg) -> bool {
+        if reg == ArchReg::Zero {
+            return false;
+        }
+
+        match self {
+            Inst::Add(dst, _, _)
+            | Inst::AddImm(dst, _, _)
+            | Inst::ShiftLeftLogicalImm(dst, _, _)
+            | Inst::LoadByte(dst, _)
+            | Inst::LoadHalfWord(dst, _)
+            | Inst::LoadWord(dst, _)
+            | Inst::JumpAndLink(dst, _) => *dst == reg,
+            Inst::BranchIfNotEqual(_, _, _)
+            | Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _)
+            | Inst::StoreByte(_, _)
+            | Inst::StoreHalfWord(_, _)
+            | Inst::StoreWord(_, _)
+            | Inst::Halt => false,
+        }
+    }
+}
+
+impl<RegType: Clone + PartialEq + Eq> Inst<RegType> {
     pub fn is_branch(&self) -> bool {
         match self {
             Inst::JumpAndLink(_, _)
@@ -158,29 +183,6 @@ impl Inst {
             Inst::LoadByte(_, _)
             | Inst::LoadHalfWord(_, _)
             | Inst::LoadWord(_, _)
-            | Inst::StoreByte(_, _)
-            | Inst::StoreHalfWord(_, _)
-            | Inst::StoreWord(_, _)
-            | Inst::Halt => false,
-        }
-    }
-
-    pub fn writes_reg(&self, reg: ArchReg) -> bool {
-        if reg == ArchReg::Zero {
-            return false;
-        }
-
-        match self {
-            Inst::Add(dst, _, _)
-            | Inst::AddImm(dst, _, _)
-            | Inst::ShiftLeftLogicalImm(dst, _, _)
-            | Inst::LoadByte(dst, _)
-            | Inst::LoadHalfWord(dst, _)
-            | Inst::LoadWord(dst, _)
-            | Inst::JumpAndLink(dst, _) => *dst == reg,
-            Inst::BranchIfNotEqual(_, _, _)
-            | Inst::BranchIfEqual(_, _, _)
-            | Inst::BranchIfGreaterEqual(_, _, _)
             | Inst::StoreByte(_, _)
             | Inst::StoreHalfWord(_, _)
             | Inst::StoreWord(_, _)

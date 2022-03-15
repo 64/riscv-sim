@@ -10,7 +10,6 @@ use crate::{
 use std::{collections::HashMap, default::Default};
 
 mod stages {
-
     use super::*;
 
     #[derive(Debug, Default, Clone)]
@@ -85,8 +84,8 @@ impl Cpu for Pipelined {
             let fetch = self.stage_fetch(&pipe);
             let decode = self.stage_decode(&pipe);
             let execute = self.stage_execute(&pipe);
-            let writeback = self.stage_writeback(&pipe);
             let memory = self.stage_memory(&pipe);
+            let writeback = self.stage_writeback(&pipe);
 
             if writeback.should_halt {
                 return ExecResult {
@@ -132,12 +131,13 @@ impl Cpu for Pipelined {
             dbg!(&pipe);
 
             cycles += 1;
-            // debug_assert!(cycles < 10, "infinite loop detected");
-            debug_assert!(cycles < 1_000, "infinite loop detected");
 
             if std::env::var("SINGLE_STEP").is_ok() {
                 std::io::stdin().read_line(&mut String::new()).unwrap();
             }
+
+            // debug_assert!(cycles < 10, "infinite loop detected");
+            debug_assert!(cycles < 10_000, "infinite loop detected");
         }
     }
 }
@@ -154,6 +154,7 @@ impl Pipelined {
                 next_pc: tgt + 1,
             }
         } else if self.is_stalled {
+            // Continue being stalled.
             pipe.fetch.clone()
         } else {
             stages::Fetch {

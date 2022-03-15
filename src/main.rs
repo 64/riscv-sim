@@ -3,6 +3,7 @@ mod emulated;
 mod hazard;
 mod inst;
 mod mem;
+mod out_of_order;
 mod pipelined;
 mod program;
 mod regs;
