@@ -16,7 +16,7 @@ pub struct RegisterAliasTable {
 }
 
 impl RegisterAliasTable {
-    pub fn new(&self, initial_regs: HashMap<ArchReg, u32>) -> Self {
+    pub fn new(initial_regs: HashMap<ArchReg, u32>) -> Self {
         Self {
             map: initial_regs
                 .into_iter()

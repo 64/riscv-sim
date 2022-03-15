@@ -1,5 +1,7 @@
-use std::str::FromStr;
+use std::{fmt::Debug, str::FromStr};
 use strum::{self, EnumString};
+
+use crate::execution_unit::EuType;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Imm(pub u32);
@@ -8,8 +10,8 @@ pub struct Imm(pub u32);
 pub struct Label(pub String);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct MemRef {
-    pub base: ArchReg,
+pub struct MemRef<RegType: Debug + Clone = ArchReg> {
+    pub base: RegType,
     pub offset: Imm,
 }
 
@@ -40,22 +42,39 @@ pub enum ArchReg {
 // https://mark.theis.site/riscv/
 // https://web.eecs.utk.edu/~smarz1/courses/ece356/notes/assembly/
 #[derive(Debug, Clone)]
-pub enum Inst<RegType: Clone + PartialEq + Eq = ArchReg> {
-    LoadByte(RegType, MemRef),
-    LoadHalfWord(RegType, MemRef),
-    LoadWord(RegType, MemRef),
-    StoreByte(RegType, MemRef),
-    StoreHalfWord(RegType, MemRef),
-    StoreWord(RegType, MemRef),
-    Add(RegType, RegType, RegType),
-    AddImm(RegType, RegType, Imm),
-    ShiftLeftLogicalImm(RegType, RegType, Imm),
-    JumpAndLink(RegType, Imm),
-    BranchIfEqual(RegType, RegType, Label),
-    BranchIfNotEqual(RegType, RegType, Label),
-    BranchIfGreaterEqual(RegType, RegType, Label),
+pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> {
+    LoadByte(DstReg, MemRef<SrcReg>),
+    LoadHalfWord(DstReg, MemRef<SrcReg>),
+    LoadWord(DstReg, MemRef<SrcReg>),
+    StoreByte(SrcReg, MemRef<SrcReg>),
+    StoreHalfWord(SrcReg, MemRef<SrcReg>),
+    StoreWord(SrcReg, MemRef<SrcReg>),
+    Add(DstReg, SrcReg, SrcReg),
+    AddImm(DstReg, SrcReg, Imm),
+    ShiftLeftLogicalImm(DstReg, SrcReg, Imm),
+    JumpAndLink(DstReg, Imm),
+    BranchIfEqual(SrcReg, SrcReg, Label),
+    BranchIfNotEqual(SrcReg, SrcReg, Label),
+    BranchIfGreaterEqual(SrcReg, SrcReg, Label),
     Halt, // Used internally when execution finishes.
 }
+
+type RsId = u32;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WithTag {
+    Valid(u32),
+    Invalid(RsId), // TODO See also rat.rs
+}
+
+// Inst with its source operands ready for computation.
+pub type ReadyInst = Inst<u32, ArchReg>;
+
+// Inst with its source operands renamed.
+pub type RenamedInst = Inst<WithTag, ArchReg>;
+
+// Inst after execution. The source registers are no longer used.
+pub type ExecutedInst = Inst<(), ArchReg>;
 
 impl FromStr for Inst {
     type Err = String;
@@ -132,7 +151,7 @@ impl Inst {
     }
 }
 
-impl<RegType: Clone + PartialEq + Eq> Inst<RegType> {
+impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
     pub fn is_branch(&self) -> bool {
         match self {
             Inst::JumpAndLink(_, _)
@@ -153,25 +172,14 @@ impl<RegType: Clone + PartialEq + Eq> Inst<RegType> {
     }
 
     pub fn is_memory_access(&self) -> bool {
-        match self {
-            Inst::LoadByte(_, _)
-            | Inst::LoadHalfWord(_, _)
-            | Inst::LoadWord(_, _)
-            | Inst::StoreByte(_, _)
-            | Inst::StoreHalfWord(_, _)
-            | Inst::StoreWord(_, _) => true,
-            Inst::JumpAndLink(_, _)
-            | Inst::BranchIfNotEqual(_, _, _)
-            | Inst::BranchIfEqual(_, _, _)
-            | Inst::BranchIfGreaterEqual(_, _, _)
-            | Inst::Add(_, _, _)
-            | Inst::AddImm(_, _, _)
-            | Inst::ShiftLeftLogicalImm(_, _, _)
-            | Inst::Halt => false,
-        }
+        self.eu_type() == EuType::LoadStore
     }
 
     pub fn is_alu(&self) -> bool {
+        self.eu_type() == EuType::ALU
+    }
+
+    pub fn eu_type(&self) -> EuType {
         match self {
             Inst::JumpAndLink(_, _)
             | Inst::BranchIfNotEqual(_, _, _)
@@ -179,15 +187,67 @@ impl<RegType: Clone + PartialEq + Eq> Inst<RegType> {
             | Inst::BranchIfGreaterEqual(_, _, _)
             | Inst::Add(_, _, _)
             | Inst::AddImm(_, _, _)
-            | Inst::ShiftLeftLogicalImm(_, _, _) => true,
+            | Inst::ShiftLeftLogicalImm(_, _, _) => EuType::ALU,
             Inst::LoadByte(_, _)
             | Inst::LoadHalfWord(_, _)
             | Inst::LoadWord(_, _)
             | Inst::StoreByte(_, _)
             | Inst::StoreHalfWord(_, _)
-            | Inst::StoreWord(_, _)
-            | Inst::Halt => false,
+            | Inst::StoreWord(_, _) => EuType::LoadStore,
+            Inst::Halt => EuType::Special,
         }
+    }
+
+    pub fn latency(&self) -> u64 {
+        match self {
+            Inst::JumpAndLink(_, _)
+            | Inst::BranchIfNotEqual(_, _, _)
+            | Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _) => 1,
+            Inst::Add(_, _, _) | Inst::AddImm(_, _, _) | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
+            Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _) => 2,
+            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => 2,
+            Inst::Halt => 0,
+        }
+    }
+
+    #[rustfmt::skip]
+    pub fn try_map_src_reg<OtherSrcReg: Debug + Clone, F: FnMut(SrcReg) -> Option<OtherSrcReg>>(
+        self,
+        mut f: F,
+    ) -> Option<Inst<OtherSrcReg, DstReg>> {
+        Some(match self {
+            Inst::Add(dst, src0, src1) => Inst::Add(dst, f(src0)?, f(src1)?),
+            Inst::AddImm(dst, src, imm) => Inst::AddImm(dst, f(src)?, imm),
+            Inst::ShiftLeftLogicalImm(dst, src, imm) => Inst::ShiftLeftLogicalImm(dst, f(src)?, imm),
+            Inst::LoadByte(dst, src) => Inst::LoadByte(dst, MemRef { base: f(src.base)?, offset: src.offset }),
+            Inst::LoadHalfWord(dst, src) => Inst::LoadHalfWord(dst, MemRef { base: f(src.base)?, offset: src.offset }),
+            Inst::LoadWord(dst, src) => Inst::LoadWord(dst, MemRef { base: f(src.base)?, offset: src.offset }),
+            Inst::StoreByte(src, dst) => Inst::StoreByte(f(src)?, MemRef { base: f(dst.base)?, offset: dst.offset }),
+            Inst::StoreHalfWord(src, dst) => Inst::StoreHalfWord(f(src)?, MemRef { base: f(dst.base)?, offset: dst.offset }),
+            Inst::StoreWord(src, dst) => Inst::StoreWord(f(src)?, MemRef { base: f(dst.base)?, offset: dst.offset }),
+            Inst::JumpAndLink(dst, label) => Inst::JumpAndLink(dst, label),
+            Inst::BranchIfNotEqual(src0, src1, label) => Inst::BranchIfNotEqual(f(src0)?, f(src1)?, label),
+            Inst::BranchIfEqual(src0, src1, label) => Inst::BranchIfEqual(f(src0)?, f(src1)?, label),
+            Inst::BranchIfGreaterEqual(src0, src1, label)=> Inst::BranchIfGreaterEqual(f(src0)?, f(src1)?, label),
+            Inst::Halt => Inst::Halt,
+        })
+    }
+
+    pub fn map_src_reg<OtherSrcReg: Debug + Clone, F: FnMut(SrcReg) -> OtherSrcReg>(
+        self,
+        mut f: F,
+    ) -> Inst<OtherSrcReg, DstReg> {
+        self.try_map_src_reg(|r| Some(f(r))).unwrap()
+    }
+}
+
+impl RenamedInst {
+    pub fn get_ready(&self) -> Option<ReadyInst> {
+        self.clone().try_map_src_reg(|r| match r {
+            WithTag::Valid(x) => Some(x),
+            WithTag::Invalid(_) => None,
+        })
     }
 }
 

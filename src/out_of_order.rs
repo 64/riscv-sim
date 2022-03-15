@@ -2,14 +2,17 @@ use std::collections::HashMap;
 
 use crate::{
     cpu::{Cpu, ExecResult},
-    inst::{ArchReg, Inst},
+    execution_unit::{EuResult, EuType, ExecutionUnit},
+    inst::{ArchReg, Inst, ReadyInst, RenamedInst, WithTag},
     mem::Memory,
     program::Program,
+    queue::Queue,
     rat::RegisterAliasTable,
-    regs::RegSet,
 };
 
 mod stages {
+    use crate::inst::ExecutedInst;
+
     use super::*;
 
     #[derive(Debug, Clone, Default)]
@@ -20,45 +23,70 @@ mod stages {
 
     #[derive(Debug, Clone, Default)]
     pub struct DecodeIssue {
-        pub inst: Option<Inst>,
+        pub should_stall: bool,
+        // pub inst: Option<Inst>,
     }
 
     #[derive(Debug, Clone, Default)]
-    pub struct Execute {
-        pub inst: Option<Inst>,
-    }
+    pub struct Execute;
 
     #[derive(Debug, Clone, Default)]
     pub struct Writeback {
-        pub inst: Option<Inst>,
+        pub inst: Option<ExecutedInst>,
+        pub result: EuResult,
     }
 
     #[derive(Debug, Clone, Default)]
     pub struct Commit {
-        pub inst: Option<Inst>,
         pub should_halt: bool,
         pub retire: bool,
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct ExecutionUnit {
-    pub executing_inst: Option<Inst>,
-    pub completed_inst: Option<Inst>,
+pub struct Scheduler {
+    rs: Queue<RenamedInst>,
 }
-
-impl ExecutionUnit {
-    fn advance(&self) {
-        todo!();
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct Scheduler {}
 
 impl Scheduler {
-    fn schedule(&mut self, inst: &Inst) {
-        todo!();
+    fn new() -> Self {
+        Self {
+            rs: Queue::new(10), // Number of entries in the RS buffer. Fully unified.
+        }
+    }
+
+    fn rename(&mut self, inst: Inst) -> RenamedInst {
+        inst.map_src_reg(|r| WithTag::Valid(0))
+    }
+
+    fn schedule(&mut self, eus: &mut [ExecutionUnit], inst: Inst) -> bool {
+        if self.rs.is_full() {
+            return true;
+        }
+
+        let renamed_inst = self.rename(inst);
+        assert!(self.rs.try_push(renamed_inst).is_none());
+
+        // Try to issue more instructions to reservation stations.
+        let mut remove_indices = vec![];
+
+        for (i, ready_inst) in self
+            .rs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, inst)| inst.get_ready().map(|inst| (i, inst)))
+        {
+            if let Some(eu) = eus.iter_mut().find(|eu| eu.can_execute(&ready_inst)) {
+                remove_indices.push(i);
+                eu.begin_execute(ready_inst);
+            }
+        }
+
+        for i in remove_indices {
+            self.rs.remove(i);
+        }
+
+        false
     }
 }
 
@@ -73,7 +101,6 @@ pub struct Pipeline {
 
 #[derive(Debug, Clone)]
 pub struct OutOfOrder {
-    initial_regs: RegSet,
     execution_units: Vec<ExecutionUnit>,
     mem: Memory,
     prog: Program,
@@ -86,10 +113,13 @@ impl Cpu for OutOfOrder {
         Self {
             mem,
             prog,
-            initial_regs: RegSet::new(regs),
-            scheduler: Default::default(),
-            execution_units: Default::default(),
-            rat: Default::default(),
+            execution_units: vec![
+                ExecutionUnit::new(EuType::ALU),
+                ExecutionUnit::new(EuType::LoadStore),
+                ExecutionUnit::new(EuType::Special),
+            ],
+            scheduler: Scheduler::new(),
+            rat: RegisterAliasTable::new(regs),
         }
     }
 
@@ -117,13 +147,24 @@ impl Cpu for OutOfOrder {
                 insts_retired += 1;
             }
 
-            pipe = Pipeline {
-                fetch,
-                decode_issue,
-                execute,
-                writeback,
-                commit,
-            };
+            if decode_issue.should_stall {
+                pipe = Pipeline {
+                    fetch: pipe.fetch,
+                    decode_issue,
+                    execute,
+                    writeback,
+                    commit,
+                };
+            } else {
+                pipe = Pipeline {
+                    fetch,
+                    decode_issue,
+                    execute,
+                    writeback,
+                    commit,
+                };
+            }
+            dbg!(&pipe);
 
             cycles += 1;
 
@@ -153,33 +194,61 @@ impl OutOfOrder {
             None => return Default::default(),
         };
 
-        // 1. Perform register renaming.
-        let renamed_inst = &inst;
-        // 2. Give instruction to the scheduler to be placed into an execution unit.
-        self.scheduler.schedule(renamed_inst);
+        // Give instruction to the scheduler to rename and be placed into an execution unit.
+        let should_stall = self.scheduler.schedule(&mut self.execution_units, inst);
 
-        stages::DecodeIssue { inst: Some(inst) }
+        stages::DecodeIssue { should_stall }
     }
 
     fn stage_execute(&mut self, pipe: &Pipeline) -> stages::Execute {
         // Advance execution of all the execution units.
-
-        for eu in &self.execution_units {
+        for eu in &mut self.execution_units {
             eu.advance();
         }
 
-        todo!()
+        stages::Execute
     }
 
     fn stage_writeback(&mut self, pipe: &Pipeline) -> stages::Writeback {
         // Take output of the execution units and write into the ROB.
 
-        todo!()
+        for eu in &mut self.execution_units {
+            if let Some((completed, result)) = eu.take_complete() {
+                // Only allow writeback of 1 instruction per cycle, for now.
+                return stages::Writeback {
+                    inst: Some(completed),
+                    result,
+                };
+            }
+        }
+
+        stages::Writeback {
+            inst: None,
+            result: EuResult::default(),
+        }
     }
 
     fn stage_commit(&mut self, pipe: &Pipeline) -> stages::Commit {
         // Commit instructions from the ROB to memory.
+        let inst = match &pipe.writeback.inst {
+            Some(Inst::Halt) => {
+                return stages::Commit {
+                    should_halt: true,
+                    retire: false,
+                }
+            }
+            Some(inst) => inst.clone(),
+            None => return Default::default(),
+        };
 
-        todo!()
+        match inst {
+            Inst::AddImm(dst, _, _) => self.rat.set_value(dst, pipe.writeback.result.val),
+            _ => todo!(),
+        }
+
+        stages::Commit {
+            should_halt: false,
+            retire: true,
+        }
     }
 }

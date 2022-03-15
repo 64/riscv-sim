@@ -1,11 +1,13 @@
 mod cpu;
 mod emulated;
+mod execution_unit;
 mod hazard;
 mod inst;
 mod mem;
 mod out_of_order;
 mod pipelined;
 mod program;
+mod queue;
 mod rat;
 mod regs;
 mod util;
