@@ -5,6 +5,7 @@ use crate::{
     inst::{ArchReg, Inst},
     mem::Memory,
     program::Program,
+    rat::RegisterAliasTable,
     regs::RegSet,
 };
 
@@ -55,6 +56,12 @@ impl ExecutionUnit {
 #[derive(Debug, Clone, Default)]
 pub struct Scheduler {}
 
+impl Scheduler {
+    fn schedule(&mut self, inst: &Inst) {
+        todo!();
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Pipeline {
     fetch: stages::Fetch,
@@ -71,6 +78,7 @@ pub struct OutOfOrder {
     mem: Memory,
     prog: Program,
     scheduler: Scheduler,
+    rat: RegisterAliasTable,
 }
 
 impl Cpu for OutOfOrder {
@@ -79,8 +87,9 @@ impl Cpu for OutOfOrder {
             mem,
             prog,
             initial_regs: RegSet::new(regs),
-            scheduler: Scheduler::default(),
-            execution_units: Vec::default(),
+            scheduler: Default::default(),
+            execution_units: Default::default(),
+            rat: Default::default(),
         }
     }
 
@@ -145,8 +154,9 @@ impl OutOfOrder {
         };
 
         // 1. Perform register renaming.
+        let renamed_inst = &inst;
         // 2. Give instruction to the scheduler to be placed into an execution unit.
-        // self.scheduler.schedule(renamed_inst);
+        self.scheduler.schedule(renamed_inst);
 
         stages::DecodeIssue { inst: Some(inst) }
     }

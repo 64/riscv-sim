@@ -92,6 +92,6 @@ mod t {
     #[instantiate_tests(<Pipelined>)]
     mod pipelined {}
 
-    // #[instantiate_tests(<OutOfOrder>)]
-    // mod out_of_order {}
+    #[instantiate_tests(<OutOfOrder>)]
+    mod out_of_order {}
 }

@@ -6,5 +6,6 @@ pub mod mem;
 pub mod out_of_order;
 pub mod pipelined;
 pub mod program;
+pub mod rat;
 pub mod regs;
 pub mod util;

@@ -47,12 +47,12 @@ pub enum Inst<RegType: Clone + PartialEq + Eq = ArchReg> {
     StoreByte(RegType, MemRef),
     StoreHalfWord(RegType, MemRef),
     StoreWord(RegType, MemRef),
-    Add(RegType,RegType,RegType),
-    AddImm(RegType,RegType, Imm),
-    ShiftLeftLogicalImm(RegType,RegType, Imm),
+    Add(RegType, RegType, RegType),
+    AddImm(RegType, RegType, Imm),
+    ShiftLeftLogicalImm(RegType, RegType, Imm),
     JumpAndLink(RegType, Imm),
-    BranchIfEqual(RegType,RegType, Label),
-    BranchIfNotEqual(RegType,RegType, Label),
+    BranchIfEqual(RegType, RegType, Label),
+    BranchIfNotEqual(RegType, RegType, Label),
     BranchIfGreaterEqual(RegType, RegType, Label),
     Halt, // Used internally when execution finishes.
 }
