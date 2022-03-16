@@ -1,18 +1,9 @@
-use crate::inst::ArchReg;
-use std::{collections::HashMap, mem};
-
-// #[derive(Debug, Clone)]
-// pub struct RegisterAlias(u32);
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum RatEntry {
-    Valid(u32),
-    Invalid(u32), // RS ID.
-}
+use crate::inst::{ArchReg, Tag, ValueOrTag};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default)]
 pub struct RegisterAliasTable {
-    map: HashMap<ArchReg, RatEntry>,
+    map: HashMap<ArchReg, ValueOrTag>,
 }
 
 impl RegisterAliasTable {
@@ -20,25 +11,42 @@ impl RegisterAliasTable {
         Self {
             map: initial_regs
                 .into_iter()
-                .map(|(k, v)| (k, RatEntry::Valid(v)))
+                .map(|(k, v)| (k, ValueOrTag::Valid(v)))
                 .collect(),
         }
     }
 
-    pub fn get(&self, reg: ArchReg) -> RatEntry {
-        *self.map.get(&reg).unwrap_or(&RatEntry::Valid(0))
+    pub fn get(&self, reg: ArchReg) -> ValueOrTag {
+        if reg == ArchReg::Zero {
+            return ValueOrTag::Valid(0);
+        }
+
+        self.map.get(&reg).cloned().unwrap_or(ValueOrTag::Valid(0))
     }
 
-    pub fn rename(&mut self, reg: ArchReg, tag: u32) {
-        debug_assert_eq!(
-            mem::discriminant(self.map.get(&reg).unwrap_or(&RatEntry::Valid(0))),
-            mem::discriminant(&RatEntry::Valid(0))
-        );
+    pub fn rename(&mut self, reg: ArchReg, tag: Tag) -> bool {
+        if reg == ArchReg::Zero {
+            return false;
+        }
 
-        self.map.insert(reg, RatEntry::Invalid(tag));
+        // #[cfg(debug_assertions)]
+        if let Some(ValueOrTag::Invalid(old_tag)) = self.map.get(&reg) {
+            return true;
+            // panic!(
+            //     "tried to rename register {:?} when it was already renamed: old = {:?}, new = {:?}",
+            //     reg, old_tag, tag
+            // );
+        }
+
+        self.map.insert(reg, ValueOrTag::Invalid(tag));
+        false
     }
 
     pub fn set_value(&mut self, reg: ArchReg, val: u32) {
-        self.map.insert(reg, RatEntry::Valid(val));
+        if reg == ArchReg::Zero {
+            return;
+        }
+
+        self.map.insert(reg, ValueOrTag::Valid(val));
     }
 }

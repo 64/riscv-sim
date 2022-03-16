@@ -1,7 +1,7 @@
-use std::{fmt::Debug, str::FromStr};
+use std::{fmt::Debug, ops::Add, str::FromStr};
 use strum::{self, EnumString};
 
-use crate::execution_unit::EuType;
+use crate::{execution_unit::EuType, util::Addr};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Imm(pub u32);
@@ -41,7 +41,7 @@ pub enum ArchReg {
 
 // https://mark.theis.site/riscv/
 // https://web.eecs.utk.edu/~smarz1/courses/ece356/notes/assembly/
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> {
     LoadByte(DstReg, MemRef<SrcReg>),
     LoadHalfWord(DstReg, MemRef<SrcReg>),
@@ -59,19 +59,25 @@ pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> 
     Halt, // Used internally when execution finishes.
 }
 
-type RsId = u32;
+pub type Tag = u64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WithTag {
+pub enum ValueOrTag {
     Valid(u32),
-    Invalid(RsId), // TODO See also rat.rs
+    Invalid(Tag), // TODO See also rat.rs
+}
+
+#[derive(Debug, Clone)]
+pub struct WithTag<I> {
+    tag: Tag,
+    inst: I,
 }
 
 // Inst with its source operands ready for computation.
 pub type ReadyInst = Inst<u32, ArchReg>;
 
 // Inst with its source operands renamed.
-pub type RenamedInst = Inst<WithTag, ArchReg>;
+pub type RenamedInst = Inst<ValueOrTag, ArchReg>;
 
 // Inst after execution. The source registers are no longer used.
 pub type ExecutedInst = Inst<(), ArchReg>;
@@ -212,42 +218,67 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
     }
 
     #[rustfmt::skip]
-    pub fn try_map_src_reg<OtherSrcReg: Debug + Clone, F: FnMut(SrcReg) -> Option<OtherSrcReg>>(
+    pub fn try_map_regs<OtherSrcReg, OtherDstReg, SrcFn, DstFn>(
         self,
-        mut f: F,
-    ) -> Option<Inst<OtherSrcReg, DstReg>> {
+        mut src_fn: SrcFn,
+        mut dst_fn: DstFn,
+    ) -> Option<Inst<OtherSrcReg, OtherDstReg>>
+    where
+        OtherSrcReg: Debug + Clone,
+        OtherDstReg: Debug + Clone,
+        SrcFn: FnMut(SrcReg) -> Option<OtherSrcReg>,
+        DstFn: FnMut(DstReg) -> Option<OtherDstReg>,
+    {
         Some(match self {
-            Inst::Add(dst, src0, src1) => Inst::Add(dst, f(src0)?, f(src1)?),
-            Inst::AddImm(dst, src, imm) => Inst::AddImm(dst, f(src)?, imm),
-            Inst::ShiftLeftLogicalImm(dst, src, imm) => Inst::ShiftLeftLogicalImm(dst, f(src)?, imm),
-            Inst::LoadByte(dst, src) => Inst::LoadByte(dst, MemRef { base: f(src.base)?, offset: src.offset }),
-            Inst::LoadHalfWord(dst, src) => Inst::LoadHalfWord(dst, MemRef { base: f(src.base)?, offset: src.offset }),
-            Inst::LoadWord(dst, src) => Inst::LoadWord(dst, MemRef { base: f(src.base)?, offset: src.offset }),
-            Inst::StoreByte(src, dst) => Inst::StoreByte(f(src)?, MemRef { base: f(dst.base)?, offset: dst.offset }),
-            Inst::StoreHalfWord(src, dst) => Inst::StoreHalfWord(f(src)?, MemRef { base: f(dst.base)?, offset: dst.offset }),
-            Inst::StoreWord(src, dst) => Inst::StoreWord(f(src)?, MemRef { base: f(dst.base)?, offset: dst.offset }),
-            Inst::JumpAndLink(dst, label) => Inst::JumpAndLink(dst, label),
-            Inst::BranchIfNotEqual(src0, src1, label) => Inst::BranchIfNotEqual(f(src0)?, f(src1)?, label),
-            Inst::BranchIfEqual(src0, src1, label) => Inst::BranchIfEqual(f(src0)?, f(src1)?, label),
-            Inst::BranchIfGreaterEqual(src0, src1, label)=> Inst::BranchIfGreaterEqual(f(src0)?, f(src1)?, label),
+            Inst::Add(dst, src0, src1) => Inst::Add(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
+            Inst::AddImm(dst, src, imm) => Inst::AddImm(dst_fn(dst)?, src_fn(src)?, imm),
+            Inst::ShiftLeftLogicalImm(dst, src, imm) => Inst::ShiftLeftLogicalImm(dst_fn(dst)?, src_fn(src)?, imm),
+            Inst::LoadByte(dst, src) => Inst::LoadByte(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
+            Inst::LoadHalfWord(dst, src) => Inst::LoadHalfWord(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
+            Inst::LoadWord(dst, src) => Inst::LoadWord(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
+            Inst::StoreByte(src, dst) => Inst::StoreByte(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
+            Inst::StoreHalfWord(src, dst) => Inst::StoreHalfWord(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
+            Inst::StoreWord(src, dst) => Inst::StoreWord(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
+            Inst::JumpAndLink(dst, label) => Inst::JumpAndLink(dst_fn(dst)?, label),
+            Inst::BranchIfNotEqual(src0, src1, label) => Inst::BranchIfNotEqual(src_fn(src0)?, src_fn(src1)?, label),
+            Inst::BranchIfEqual(src0, src1, label) => Inst::BranchIfEqual(src_fn(src0)?, src_fn(src1)?, label),
+            Inst::BranchIfGreaterEqual(src0, src1, label)=> Inst::BranchIfGreaterEqual(src_fn(src0)?, src_fn(src1)?, label),
             Inst::Halt => Inst::Halt,
         })
     }
 
-    pub fn map_src_reg<OtherSrcReg: Debug + Clone, F: FnMut(SrcReg) -> OtherSrcReg>(
+    pub fn map_regs<OtherSrcReg, OtherDstReg, SrcFn, DstFn>(
         self,
-        mut f: F,
-    ) -> Inst<OtherSrcReg, DstReg> {
-        self.try_map_src_reg(|r| Some(f(r))).unwrap()
+        mut src_fn: SrcFn,
+        mut dst_fn: DstFn,
+    ) -> Inst<OtherSrcReg, OtherDstReg>
+    where
+        OtherSrcReg: Debug + Clone,
+        OtherDstReg: Debug + Clone,
+        SrcFn: FnMut(SrcReg) -> OtherSrcReg,
+        DstFn: FnMut(DstReg) -> OtherDstReg,
+    {
+        self.try_map_regs(
+            |src_reg| Some(src_fn(src_reg)),
+            |dst_reg| Some(dst_fn(dst_reg)),
+        )
+        .unwrap()
+    }
+
+    pub fn executed(self) -> Inst<(), DstReg> {
+        self.map_regs(|_src_reg| (), |dst_reg| dst_reg)
     }
 }
 
 impl RenamedInst {
     pub fn get_ready(&self) -> Option<ReadyInst> {
-        self.clone().try_map_src_reg(|r| match r {
-            WithTag::Valid(x) => Some(x),
-            WithTag::Invalid(_) => None,
-        })
+        self.clone().try_map_regs(
+            |r| match r {
+                ValueOrTag::Valid(x) => Some(x),
+                ValueOrTag::Invalid(_) => None,
+            },
+            |dst_reg| Some(dst_reg),
+        )
     }
 }
 
@@ -313,6 +344,12 @@ impl FromStr for MemRef {
             .map_err(|_| format!("invalid mem ref (imm): '{s}'"))?;
 
         Ok(MemRef { base, offset })
+    }
+}
+
+impl<RegType: Debug + Clone + Add<u32, Output = u32>> MemRef<RegType> {
+    pub fn compute_addr(self) -> Addr {
+        Addr(self.base + self.offset.0)
     }
 }
 

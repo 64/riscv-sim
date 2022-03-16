@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     cpu::{Cpu, ExecResult},
     execution_unit::{EuResult, EuType, ExecutionUnit},
-    inst::{ArchReg, Inst, ReadyInst, RenamedInst, WithTag},
+    inst::{ArchReg, Inst, ReadyInst, RenamedInst, Tag, ValueOrTag},
     mem::Memory,
     program::Program,
     queue::Queue,
@@ -33,6 +33,7 @@ mod stages {
     #[derive(Debug, Clone, Default)]
     pub struct Writeback {
         pub inst: Option<ExecutedInst>,
+        pub tag: Tag,
         pub result: EuResult,
     }
 
@@ -40,53 +41,6 @@ mod stages {
     pub struct Commit {
         pub should_halt: bool,
         pub retire: bool,
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Scheduler {
-    rs: Queue<RenamedInst>,
-}
-
-impl Scheduler {
-    fn new() -> Self {
-        Self {
-            rs: Queue::new(10), // Number of entries in the RS buffer. Fully unified.
-        }
-    }
-
-    fn rename(&mut self, inst: Inst) -> RenamedInst {
-        inst.map_src_reg(|r| WithTag::Valid(0))
-    }
-
-    fn schedule(&mut self, eus: &mut [ExecutionUnit], inst: Inst) -> bool {
-        if self.rs.is_full() {
-            return true;
-        }
-
-        let renamed_inst = self.rename(inst);
-        assert!(self.rs.try_push(renamed_inst).is_none());
-
-        // Try to issue more instructions to reservation stations.
-        let mut remove_indices = vec![];
-
-        for (i, ready_inst) in self
-            .rs
-            .iter()
-            .enumerate()
-            .filter_map(|(i, inst)| inst.get_ready().map(|inst| (i, inst)))
-        {
-            if let Some(eu) = eus.iter_mut().find(|eu| eu.can_execute(&ready_inst)) {
-                remove_indices.push(i);
-                eu.begin_execute(ready_inst);
-            }
-        }
-
-        for i in remove_indices {
-            self.rs.remove(i);
-        }
-
-        false
     }
 }
 
@@ -104,8 +58,10 @@ pub struct OutOfOrder {
     execution_units: Vec<ExecutionUnit>,
     mem: Memory,
     prog: Program,
-    scheduler: Scheduler,
-    rat: RegisterAliasTable,
+    reservation_station: HashMap<Tag, RenamedInst>,
+    frontend_rat: RegisterAliasTable,
+    cycles: u64,
+    rs_max: usize,
 }
 
 impl Cpu for OutOfOrder {
@@ -118,27 +74,28 @@ impl Cpu for OutOfOrder {
                 ExecutionUnit::new(EuType::LoadStore),
                 ExecutionUnit::new(EuType::Special),
             ],
-            scheduler: Scheduler::new(),
-            rat: RegisterAliasTable::new(regs),
+            reservation_station: HashMap::new(),
+            rs_max: 10,
+            cycles: 0,
+            frontend_rat: RegisterAliasTable::new(regs),
         }
     }
 
     fn exec_all(mut self) -> ExecResult {
-        let mut cycles = 0;
         let mut insts_retired = 0;
         let mut pipe = Pipeline::default();
 
         loop {
             let fetch = self.stage_fetch(&pipe);
             let decode_issue = self.stage_decode_issue(&pipe);
-            let execute = self.stage_execute(&pipe);
             let writeback = self.stage_writeback(&pipe);
+            let execute = self.stage_execute(&pipe);
             let commit = self.stage_commit(&pipe);
 
             if commit.should_halt {
                 return ExecResult {
                     mem: self.mem,
-                    cycles_taken: cycles,
+                    cycles_taken: self.cycles,
                     insts_retired,
                 };
             }
@@ -164,21 +121,87 @@ impl Cpu for OutOfOrder {
                     commit,
                 };
             }
-            dbg!(&pipe);
 
-            cycles += 1;
+            self.cycles += 1;
 
             if std::env::var("SINGLE_STEP").is_ok() {
+                self.dump(&pipe);
                 std::io::stdin().read_line(&mut String::new()).unwrap();
             }
 
-            // debug_assert!(cycles < 10, "infinite loop detected");
-            debug_assert!(cycles < 10_000, "infinite loop detected");
+            // debug_assert!(self.cycles < 10, "infinite loop detected");
+            debug_assert!(self.cycles < 10_000, "infinite loop detected");
         }
     }
 }
 
 impl OutOfOrder {
+    #[allow(dead_code)]
+    fn dump(&self, pipe: &Pipeline) {
+        dbg!(&self.frontend_rat);
+        dbg!(&self.reservation_station);
+        dbg!(&self.execution_units);
+        dbg!(pipe);
+    }
+
+    fn rename_and_reserve(&mut self, inst: Inst) -> bool {
+        let mut inst_dst_reg = None;
+        let renamed_inst = inst.map_regs(
+            |src_reg| self.frontend_rat.get(src_reg),
+            |dst_reg| {
+                let old_reg = inst_dst_reg.replace(dst_reg); // Disallow more than one dst reg.
+                debug_assert_eq!(old_reg, None);
+                dst_reg
+            },
+        );
+
+        // Assumes we only schedule 1 inst per cycle.
+        let tag = Tag::from(self.cycles);
+
+        if let Some(dst_reg) = inst_dst_reg {
+            if self.frontend_rat.rename(dst_reg, tag) {
+                return true; // We need to stall here. TODO: ROB
+            }
+        }
+
+        assert_eq!(self.reservation_station.insert(tag, renamed_inst), None);
+        false
+    }
+
+    fn schedule(&mut self, inst: Inst) -> bool {
+        if self.reservation_station.len() == self.rs_max {
+            return true;
+        }
+
+        if self.rename_and_reserve(inst) {
+            return true;
+        }
+
+        // Try to issue more instructions to reservation stations.
+        let mut remove_tags = vec![];
+
+        for (tag, ready_inst) in self
+            .reservation_station
+            .iter()
+            .filter_map(|(&tag, inst)| inst.get_ready().map(|inst| (tag, inst)))
+        {
+            if let Some(eu) = self
+                .execution_units
+                .iter_mut()
+                .find(|eu| eu.can_execute(&ready_inst))
+            {
+                remove_tags.push(tag);
+                eu.begin_execute(ready_inst, tag);
+            }
+        }
+
+        for tag in remove_tags {
+            self.reservation_station.remove(&tag);
+        }
+
+        false
+    }
+
     fn stage_fetch(&mut self, pipe: &Pipeline) -> stages::Fetch {
         let fetch_or_halt = |pc| self.prog.fetch(pc).cloned().unwrap_or(Inst::Halt);
 
@@ -195,7 +218,7 @@ impl OutOfOrder {
         };
 
         // Give instruction to the scheduler to rename and be placed into an execution unit.
-        let should_stall = self.scheduler.schedule(&mut self.execution_units, inst);
+        let should_stall = self.schedule(inst);
 
         stages::DecodeIssue { should_stall }
     }
@@ -203,7 +226,7 @@ impl OutOfOrder {
     fn stage_execute(&mut self, pipe: &Pipeline) -> stages::Execute {
         // Advance execution of all the execution units.
         for eu in &mut self.execution_units {
-            eu.advance();
+            eu.advance(&mut self.mem);
         }
 
         stages::Execute
@@ -213,10 +236,11 @@ impl OutOfOrder {
         // Take output of the execution units and write into the ROB.
 
         for eu in &mut self.execution_units {
-            if let Some((completed, result)) = eu.take_complete() {
+            if let Some((completed, tag, result)) = eu.take_complete() {
                 // Only allow writeback of 1 instruction per cycle, for now.
                 return stages::Writeback {
                     inst: Some(completed),
+                    tag,
                     result,
                 };
             }
@@ -224,6 +248,7 @@ impl OutOfOrder {
 
         stages::Writeback {
             inst: None,
+            tag: 0,
             result: EuResult::default(),
         }
     }
@@ -242,8 +267,25 @@ impl OutOfOrder {
         };
 
         match inst {
-            Inst::AddImm(dst, _, _) => self.rat.set_value(dst, pipe.writeback.result.val),
+            Inst::AddImm(dst, _, _) => self.frontend_rat.set_value(dst, pipe.writeback.result.val),
+            x if x.is_memory_access() => (),
             _ => todo!(),
+        }
+
+        // Broadcast tag of completed instruction to waiting instructions.
+        for (_, waiting_inst) in self.reservation_station.iter_mut() {
+            let completed_tag = pipe.writeback.tag;
+            let completed_result = pipe.writeback.result.val;
+            *waiting_inst = waiting_inst.clone().map_regs(
+                |src_reg| {
+                    if src_reg == ValueOrTag::Invalid(completed_tag) {
+                        ValueOrTag::Valid(completed_result)
+                    } else {
+                        src_reg
+                    }
+                },
+                |dst_reg| dst_reg,
+            );
         }
 
         stages::Commit {
