@@ -1,7 +1,10 @@
+use crate::{
+    execution_unit::EuType,
+    regs::{PrfEntry, RegFile},
+    util::Addr,
+};
 use std::{fmt::Debug, ops::Add, str::FromStr};
-use strum::{self, EnumString};
-
-use crate::{execution_unit::EuType, util::Addr};
+use strum::{self, EnumIter, EnumString};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Imm(pub u32);
@@ -16,7 +19,7 @@ pub struct MemRef<RegType: Debug + Clone = ArchReg> {
 }
 
 // https://en.wikichip.org/wiki/risc-v/registers
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumString)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumString, EnumIter)]
 #[strum(serialize_all = "lowercase")]
 pub enum ArchReg {
     Zero,
@@ -60,11 +63,12 @@ pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> 
 }
 
 pub type Tag = u64;
+pub type PhysReg = Tag;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ValueOrTag {
-    Valid(u32),
-    Invalid(Tag), // TODO See also rat.rs
+pub enum ValueOrReg {
+    Value(u32),
+    Reg(PhysReg),
 }
 
 #[derive(Debug, Clone)]
@@ -73,14 +77,20 @@ pub struct WithTag<I> {
     inst: I,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BothReg {
+    pub arch: ArchReg,
+    pub phys: PhysReg,
+}
+
 // Inst with its source operands ready for computation.
-pub type ReadyInst = Inst<u32, ArchReg>;
+pub type ReadyInst = Inst<u32, BothReg>;
 
 // Inst with its source operands renamed.
-pub type RenamedInst = Inst<ValueOrTag, ArchReg>;
+pub type RenamedInst = Inst<ValueOrReg, BothReg>;
 
 // Inst after execution. The source registers are no longer used.
-pub type ExecutedInst = Inst<(), ArchReg>;
+pub type ExecutedInst = Inst<(), BothReg>;
 
 impl FromStr for Inst {
     type Err = String;
@@ -265,17 +275,36 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
         .unwrap()
     }
 
+    pub fn map_src_regs<OtherSrcReg, SrcFn>(self, mut src_fn: SrcFn) -> Inst<OtherSrcReg, DstReg>
+    where
+        OtherSrcReg: Debug + Clone,
+        SrcFn: FnMut(SrcReg) -> OtherSrcReg,
+    {
+        self.map_regs(|src_reg| src_fn(src_reg), |dst_reg| dst_reg)
+    }
+
+    pub fn map_dst_regs<OtherDstReg, DstFn>(self, mut dst_fn: DstFn) -> Inst<SrcReg, OtherDstReg>
+    where
+        OtherDstReg: Debug + Clone,
+        DstFn: FnMut(DstReg) -> OtherDstReg,
+    {
+        self.map_regs(|src_reg| src_reg, |dst_reg| dst_fn(dst_reg))
+    }
+
     pub fn executed(self) -> Inst<(), DstReg> {
         self.map_regs(|_src_reg| (), |dst_reg| dst_reg)
     }
 }
 
 impl RenamedInst {
-    pub fn get_ready(&self) -> Option<ReadyInst> {
+    pub fn get_ready(&self, rf: &RegFile) -> Option<ReadyInst> {
         self.clone().try_map_regs(
             |r| match r {
-                ValueOrTag::Valid(x) => Some(x),
-                ValueOrTag::Invalid(_) => None,
+                ValueOrReg::Value(x) => Some(x),
+                ValueOrReg::Reg(phys_reg) => match rf.get_phys(phys_reg) {
+                    PrfEntry::Active(x) => Some(x),
+                    _ => None,
+                },
             },
             |dst_reg| Some(dst_reg),
         )

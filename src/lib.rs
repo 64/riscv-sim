@@ -8,6 +8,5 @@ pub mod out_of_order;
 pub mod pipelined;
 pub mod program;
 pub mod queue;
-pub mod rat;
 pub mod regs;
 pub mod util;

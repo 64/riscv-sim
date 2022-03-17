@@ -8,7 +8,6 @@ mod out_of_order;
 mod pipelined;
 mod program;
 mod queue;
-mod rat;
 mod regs;
 mod util;
 
