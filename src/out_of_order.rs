@@ -155,12 +155,12 @@ impl OutOfOrder {
             },
         );
 
-        // Assumes we only schedule 1 inst per cycle.
+        // Assumes we only issue 1 inst per cycle.
         let tag = Tag::from(self.cycles);
 
         if let Some(dst_reg) = inst_dst_reg {
             if self.frontend_rat.rename(dst_reg, tag) {
-                return true; // We need to stall here. TODO: ROB
+                // return true; // We need to stall here. TODO: ROB
             }
         }
 
@@ -168,15 +168,7 @@ impl OutOfOrder {
         false
     }
 
-    fn schedule(&mut self, inst: Inst) -> bool {
-        if self.reservation_station.len() == self.rs_max {
-            return true;
-        }
-
-        if self.rename_and_reserve(inst) {
-            return true;
-        }
-
+    fn issue(&mut self, inst: Inst) -> bool {
         // Try to issue more instructions to reservation stations.
         let mut remove_tags = vec![];
 
@@ -185,6 +177,7 @@ impl OutOfOrder {
             .iter()
             .filter_map(|(&tag, inst)| inst.get_ready().map(|inst| (tag, inst)))
         {
+            dbg!(tag, &inst);
             if let Some(eu) = self
                 .execution_units
                 .iter_mut()
@@ -197,6 +190,14 @@ impl OutOfOrder {
 
         for tag in remove_tags {
             self.reservation_station.remove(&tag);
+        }
+
+        if self.reservation_station.len() == self.rs_max {
+            return true;
+        }
+
+        if self.rename_and_reserve(inst) {
+            return true;
         }
 
         false
@@ -218,7 +219,7 @@ impl OutOfOrder {
         };
 
         // Give instruction to the scheduler to rename and be placed into an execution unit.
-        let should_stall = self.schedule(inst);
+        let should_stall = self.issue(inst);
 
         stages::DecodeIssue { should_stall }
     }
@@ -267,9 +268,11 @@ impl OutOfOrder {
         };
 
         match inst {
-            Inst::AddImm(dst, _, _) => self.frontend_rat.set_value(dst, pipe.writeback.result.val),
-            x if x.is_memory_access() => (),
-            _ => todo!(),
+            Inst::AddImm(dst, _, _) | Inst::LoadWord(dst, _) => {
+                self.frontend_rat.set_value(dst, pipe.writeback.result.val)
+            }
+            Inst::StoreWord(_, _) => (),
+            _ => unimplemented!("{:?}", inst),
         }
 
         // Broadcast tag of completed instruction to waiting instructions.

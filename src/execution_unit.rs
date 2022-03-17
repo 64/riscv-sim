@@ -20,6 +20,7 @@ type CyclesTaken = u64;
 #[derive(Debug, Clone)]
 pub struct ExecutionUnit {
     eu_type: EuType,
+    begin_inst: Option<(ReadyInst, Tag)>,
     executing_inst: Option<(ReadyInst, Tag, CyclesTaken)>,
     completed_inst: Option<(ExecutedInst, Tag, EuResult)>,
 }
@@ -28,8 +29,9 @@ impl ExecutionUnit {
     pub fn new(eu_type: EuType) -> Self {
         Self {
             eu_type,
-            completed_inst: Default::default(),
+            begin_inst: Default::default(),
             executing_inst: Default::default(),
+            completed_inst: Default::default(),
         }
     }
 
@@ -39,7 +41,7 @@ impl ExecutionUnit {
 
     pub fn begin_execute(&mut self, inst: ReadyInst, tag: Tag) {
         debug_assert!(self.can_execute(&inst));
-        self.executing_inst = Some((inst, tag, 0));
+        self.begin_inst = Some((inst, tag));
     }
 
     pub fn advance(&mut self, mem: &mut Memory) {
@@ -51,6 +53,8 @@ impl ExecutionUnit {
                 // Increment cycles, and carry on.
                 self.executing_inst = Some((inst, tag, cycles + 1));
             }
+        } else if let Some((inst, tag)) = self.begin_inst.take() {
+            self.executing_inst = Some((inst, tag, 0));
         }
     }
 
