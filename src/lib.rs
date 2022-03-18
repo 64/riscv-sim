@@ -9,4 +9,5 @@ pub mod pipelined;
 pub mod program;
 pub mod queue;
 pub mod regs;
+pub mod rob;
 pub mod util;

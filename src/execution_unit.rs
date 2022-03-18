@@ -1,5 +1,5 @@
 use crate::{
-    inst::{ArchReg, ExecutedInst, Inst, ReadyInst, Tag},
+    inst::{ExecutedInst, Inst, ReadyInst, Tag},
     mem::Memory,
 };
 
@@ -36,7 +36,7 @@ impl ExecutionUnit {
     }
 
     pub fn can_execute(&self, inst: &ReadyInst) -> bool {
-        self.eu_type == inst.eu_type() && self.executing_inst.is_none()
+        self.eu_type == inst.eu_type() && self.begin_inst.is_none() && self.executing_inst.is_none()
     }
 
     pub fn begin_execute(&mut self, inst: ReadyInst, tag: Tag) {

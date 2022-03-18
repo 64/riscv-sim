@@ -1,10 +1,10 @@
 use strum::IntoEnumIterator;
 
 use crate::{
-    inst::{ArchReg, MemRef, PhysReg, Tag},
+    inst::{ArchReg, MemRef, PhysReg},
     util::Addr,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone)]
 pub struct RegSet {
@@ -13,9 +13,9 @@ pub struct RegSet {
 
 #[derive(Debug, Clone)]
 pub struct RegFile {
-    front_rf: ArchRegFile,
-    back_rf: ArchRegFile,
-    phys_rf: PhysRegFile,
+    rat: HashMap<ArchReg, PhysReg>,
+    phys_rf: Vec<PrfEntry>,
+    prrt: VecDeque<PhysReg>, // Post-retirement reclaim table
 }
 
 // https://ece.uwaterloo.ca/~maagaard/ece720-t4/lec-05.pdf
@@ -24,36 +24,17 @@ pub enum PrfEntry {
     Free,
     Reserved,
     Active(u32),
-    Unused,
-}
-
-#[derive(Debug, Clone)]
-struct PhysRegFile {
-    map: Vec<PrfEntry>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ArchRegFile {
-    map: HashMap<ArchReg, PhysReg>,
-}
-
-impl PhysRegFile {
-    pub fn new(capacity: usize) -> Self {
-        assert!(PhysReg::try_from(capacity).is_ok());
-        Self {
-            map: vec![PrfEntry::Free; capacity],
-        }
-    }
 }
 
 impl RegFile {
     pub fn new(initial_regs: HashMap<ArchReg, u32>, prf_capacity: usize) -> Self {
         assert!(initial_regs.len() <= prf_capacity);
+        assert!(PhysReg::try_from(prf_capacity).is_ok());
 
         let mut rf = Self {
-            phys_rf: PhysRegFile::new(prf_capacity),
-            back_rf: ArchRegFile::default(),
-            front_rf: ArchRegFile::default(),
+            rat: Default::default(),
+            phys_rf: vec![PrfEntry::Free; prf_capacity],
+            prrt: Default::default(),
         };
 
         for reg in ArchReg::iter() {
@@ -64,54 +45,56 @@ impl RegFile {
             let val = initial_regs.get(&reg).unwrap_or(&0);
             let slot = rf.allocate_phys().unwrap();
             rf.set_phys_active(slot, *val);
-            rf.set_back(reg, slot);
-            rf.set_front(reg, slot);
+            rf.set_alias(reg, slot);
         }
 
         rf
     }
 
     pub fn allocate_phys(&mut self) -> Option<PhysReg> {
-        let slot = self.phys_rf.map.iter().position(|&r| r == PrfEntry::Free)?;
-        self.phys_rf.map[slot] = PrfEntry::Reserved;
+        let slot = self.phys_rf.iter().position(|&r| r == PrfEntry::Free)?;
+        self.phys_rf[slot] = PrfEntry::Reserved;
+
+        // Allocate an entry in the PRRT.
+        self.prrt.push_back(slot.try_into().unwrap());
+
         Some(PhysReg::try_from(slot).unwrap())
     }
 
-    pub fn get_front(&self, arch_reg: ArchReg) -> PhysReg {
+    pub fn release_phys(&mut self) {
+        let slot = self
+            .prrt
+            .pop_front()
+            .expect("released PRRT entry when none was allocated");
+        self.phys_rf[usize::try_from(slot).unwrap()] = PrfEntry::Free;
+    }
+
+    pub fn get_alias(&self, arch_reg: ArchReg) -> PhysReg {
         if arch_reg == ArchReg::Zero {
             return PhysReg::try_from(0).unwrap();
         }
 
-        self.front_rf.map.get(&arch_reg).copied().unwrap()
+        self.rat.get(&arch_reg).copied().unwrap()
     }
 
     pub fn get_phys(&self, phys_reg: PhysReg) -> PrfEntry {
         *self
             .phys_rf
-            .map
             .get(usize::try_from(phys_reg).unwrap())
             .expect("phys reg out of bounds")
     }
 
     pub fn set_phys_active(&mut self, phys_reg: PhysReg, val: u32) {
-        self.phys_rf.map[usize::try_from(phys_reg).unwrap()] = PrfEntry::Active(val);
+        self.phys_rf[usize::try_from(phys_reg).unwrap()] = PrfEntry::Active(val);
     }
 
-    pub fn set_front(&mut self, arch_reg: ArchReg, phys_reg: PhysReg) {
+    pub fn set_alias(&mut self, arch_reg: ArchReg, phys_reg: PhysReg) {
         if arch_reg == ArchReg::Zero {
             todo!();
             // return;
         }
 
-        self.front_rf.map.insert(arch_reg, phys_reg);
-    }
-
-    pub fn set_back(&mut self, arch_reg: ArchReg, phys_reg: PhysReg) {
-        if arch_reg == ArchReg::Zero {
-            return;
-        }
-
-        self.back_rf.map.insert(arch_reg, phys_reg);
+        self.rat.insert(arch_reg, phys_reg);
     }
 }
 

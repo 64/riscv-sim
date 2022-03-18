@@ -1,16 +1,17 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap};
 
 use crate::{
     cpu::{Cpu, ExecResult},
-    execution_unit::{EuResult, EuType, ExecutionUnit},
-    inst::{ArchReg, BothReg, Inst, PhysReg, ReadyInst, RenamedInst, Tag, ValueOrReg},
+    execution_unit::{EuType, ExecutionUnit},
+    inst::{ArchReg, BothReg, Inst, PhysReg, RenamedInst, Tag, ValueOrReg},
     mem::Memory,
     program::Program,
     regs::RegFile,
+    rob::ReorderBuffer,
 };
 
 mod stages {
-    use crate::inst::{ExecutedInst, PhysReg};
+    use crate::inst::{ExecutedInst};
 
     use super::*;
 
@@ -22,8 +23,8 @@ mod stages {
 
     #[derive(Debug, Clone, Default)]
     pub struct DecodeIssue {
+        pub inst: Option<Inst>,
         pub should_stall: bool,
-        // pub inst: Option<Inst>,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -32,17 +33,18 @@ mod stages {
     #[derive(Debug, Clone, Default)]
     pub struct Writeback {
         pub inst: Option<ExecutedInst>,
-        pub phys_reg: PhysReg,
     }
 
     #[derive(Debug, Clone, Default)]
     pub struct Commit {
+        pub inst: Option<Inst>,
         pub should_halt: bool,
         pub retire: bool,
     }
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(unused)]
 pub struct Pipeline {
     fetch: stages::Fetch,
     decode_issue: stages::DecodeIssue,
@@ -53,10 +55,11 @@ pub struct Pipeline {
 
 #[derive(Debug, Clone)]
 pub struct OutOfOrder {
-    execution_units: Vec<ExecutionUnit>,
     mem: Memory,
     prog: Program,
-    reservation_station: BTreeMap<Tag, RenamedInst>,
+    execution_units: Vec<ExecutionUnit>,
+    reservation_station: HashMap<Tag, RenamedInst>,
+    rob: ReorderBuffer,
     reg_file: RegFile,
     cycles: u64,
     rs_max: usize,
@@ -72,6 +75,7 @@ impl Cpu for OutOfOrder {
                 ExecutionUnit::new(EuType::LoadStore),
                 ExecutionUnit::new(EuType::Special),
             ],
+            rob: ReorderBuffer::new(20),
             reservation_station: Default::default(),
             reg_file: RegFile::new(regs, 32),
             rs_max: 10,
@@ -137,6 +141,7 @@ impl OutOfOrder {
     #[allow(dead_code)]
     fn dump(&self, pipe: &Pipeline) {
         dbg!(&self.reg_file);
+        dbg!(&self.rob);
         dbg!(&self.reservation_station);
         dbg!(&self.execution_units);
         dbg!(pipe);
@@ -145,11 +150,16 @@ impl OutOfOrder {
     fn rename_and_reserve(&mut self, inst: Inst) -> bool {
         // Assumes we only issue 1 inst per cycle.
         let tag = Tag::from(self.cycles);
+
+        if self.rob.is_full() || self.reservation_station.len() == self.rs_max {
+            return true;
+        }
+
         let mut should_stall = false;
 
-        let renamed_inst = inst.map_src_regs(|src_reg| match src_reg {
+        let renamed_inst = inst.clone().map_src_regs(|src_reg| match src_reg {
             ArchReg::Zero => ValueOrReg::Value(0),
-            src_reg => ValueOrReg::Reg(self.reg_file.get_front(src_reg)),
+            src_reg => ValueOrReg::Reg(self.reg_file.get_alias(src_reg)),
         });
         let renamed_inst = renamed_inst.map_dst_regs(|dst_reg| {
             if dst_reg == ArchReg::Zero {
@@ -158,7 +168,7 @@ impl OutOfOrder {
                     phys: 0, // Doesn't matter, (?)
                 }
             } else if let Some(slot) = self.reg_file.allocate_phys() {
-                self.reg_file.set_front(dst_reg, slot);
+                self.reg_file.set_alias(dst_reg, slot);
                 BothReg {
                     arch: dst_reg,
                     phys: slot,
@@ -176,6 +186,7 @@ impl OutOfOrder {
             return true;
         }
 
+        assert_eq!(self.rob.try_push(tag, inst), None);
         assert_eq!(self.reservation_station.insert(tag, renamed_inst), None);
         false
     }
@@ -194,6 +205,11 @@ impl OutOfOrder {
                 .iter_mut()
                 .find(|eu| eu.can_execute(&ready_inst))
             {
+                // Enforce that stores and loads must execute in program order.
+                if ready_inst.is_mem_access() && !self.rob.is_earliest_mem_access(tag) {
+                    continue;
+                }
+
                 remove_tags.push(tag);
                 eu.begin_execute(ready_inst, tag);
             }
@@ -201,10 +217,6 @@ impl OutOfOrder {
 
         for tag in remove_tags {
             self.reservation_station.remove(&tag);
-        }
-
-        if self.reservation_station.len() == self.rs_max {
-            return true;
         }
 
         if self.rename_and_reserve(inst) {
@@ -230,12 +242,15 @@ impl OutOfOrder {
         };
 
         // Give instruction to the scheduler to rename and be placed into an execution unit.
-        let should_stall = self.issue(inst);
+        let should_stall = self.issue(inst.clone());
 
-        stages::DecodeIssue { should_stall }
+        stages::DecodeIssue {
+            inst: Some(inst),
+            should_stall,
+        }
     }
 
-    fn stage_execute(&mut self, pipe: &Pipeline) -> stages::Execute {
+    fn stage_execute(&mut self, _pipe: &Pipeline) -> stages::Execute {
         // Advance execution of all the execution units.
         for eu in &mut self.execution_units {
             eu.advance(&mut self.mem);
@@ -244,7 +259,7 @@ impl OutOfOrder {
         stages::Execute
     }
 
-    fn stage_writeback(&mut self, pipe: &Pipeline) -> stages::Writeback {
+    fn stage_writeback(&mut self, _pipe: &Pipeline) -> stages::Writeback {
         // Take output of the execution units and write into the ROB.
 
         for eu in &mut self.execution_units {
@@ -263,56 +278,50 @@ impl OutOfOrder {
 
                 // Broadcast tag of completed instruction to waiting instructions.
                 for (_, waiting_inst) in self.reservation_station.iter_mut() {
-                    *waiting_inst = waiting_inst.clone().map_regs(
-                        |src_reg| {
-                            if src_reg == ValueOrReg::Reg(completed_reg) {
-                                ValueOrReg::Value(result.val)
-                            } else {
-                                src_reg
-                            }
-                        },
-                        |dst_reg| dst_reg,
-                    );
+                    *waiting_inst = waiting_inst.clone().map_src_regs(|src_reg| {
+                        if src_reg == ValueOrReg::Reg(completed_reg) {
+                            ValueOrReg::Value(result.val)
+                        } else {
+                            src_reg
+                        }
+                    });
                 }
 
-                // TODO: Now we can deallocate the physical register (?)
-                // I think this should be done when we point the RRF away from the entry.
+                self.rob.mark_complete(tag);
 
-                return stages::Writeback {
-                    inst: Some(inst),
-                    phys_reg: completed_reg,
-                };
+                return stages::Writeback { inst: Some(inst) };
             }
         }
 
-        stages::Writeback {
-            inst: None,
-            phys_reg: 0,
-        }
+        stages::Writeback { inst: None }
     }
 
-    fn stage_commit(&mut self, pipe: &Pipeline) -> stages::Commit {
-        // Commit instructions from the ROB to memory.
-        let inst = match &pipe.writeback.inst {
-            Some(Inst::Halt) => {
+    fn stage_commit(&mut self, _pipe: &Pipeline) -> stages::Commit {
+        // Commit instructions from the ROB to architectural state.
+        let inst = match self.rob.try_pop() {
+            i @ Some(Inst::Halt) => {
                 return stages::Commit {
+                    inst: i,
                     should_halt: true,
                     retire: false,
                 }
             }
-            Some(inst) => inst.clone(),
+            Some(inst) => inst,
             None => return Default::default(),
         };
 
         match inst {
             Inst::AddImm(dst, _, _) | Inst::LoadWord(dst, _) => {
-                self.reg_file.set_back(dst.arch, dst.phys);
+                if dst != ArchReg::Zero {
+                    self.reg_file.release_phys();
+                }
             }
             Inst::StoreWord(_, _) => (),
             _ => unimplemented!("{:?}", inst),
         }
 
         stages::Commit {
+            inst: Some(inst),
             should_halt: false,
             retire: true,
         }

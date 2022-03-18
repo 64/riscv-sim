@@ -71,12 +71,6 @@ pub enum ValueOrReg {
     Reg(PhysReg),
 }
 
-#[derive(Debug, Clone)]
-pub struct WithTag<I> {
-    tag: Tag,
-    inst: I,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BothReg {
     pub arch: ArchReg,
@@ -187,12 +181,8 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
         }
     }
 
-    pub fn is_memory_access(&self) -> bool {
+    pub fn is_mem_access(&self) -> bool {
         self.eu_type() == EuType::LoadStore
-    }
-
-    pub fn is_alu(&self) -> bool {
-        self.eu_type() == EuType::ALU
     }
 
     pub fn eu_type(&self) -> EuType {

@@ -26,6 +26,10 @@ impl<T: Clone> Queue<T> {
         self.data.pop_front()
     }
 
+    pub fn front(&self) -> Option<&T> {
+        self.data.front()
+    }
+
     pub fn is_full(&self) -> bool {
         self.data.capacity() == self.data.len()
     }
@@ -34,7 +38,7 @@ impl<T: Clone> Queue<T> {
         self.data.iter()
     }
 
-    pub fn remove(&mut self, index: usize) -> Option<T> {
-        self.data.remove(index)
+    pub fn iter_mut(&mut self) -> vec_deque::IterMut<'_, T> {
+        self.data.iter_mut()
     }
 }

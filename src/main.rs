@@ -9,6 +9,7 @@ mod pipelined;
 mod program;
 mod queue;
 mod regs;
+mod rob;
 mod util;
 
 use crate::{cpu::Cpu, mem::Memory};

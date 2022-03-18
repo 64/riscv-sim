@@ -279,7 +279,7 @@ impl Pipelined {
                 eprintln!("writing {} to {:?}", val, addr);
                 self.mem.writew(addr, val);
             }
-            ref x => debug_assert!(!x.is_memory_access()),
+            ref x => debug_assert!(!x.is_mem_access()),
         }
 
         stages::Memory {
@@ -330,7 +330,7 @@ impl Pipelined {
                 };
             }
             // The other memory accesses are handled in the previous pipeline stage
-            x if x.is_memory_access() => (),
+            x if x.is_mem_access() => (),
             _ => unimplemented!("{:?}", inst),
         }
 
