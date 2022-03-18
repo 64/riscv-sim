@@ -3,7 +3,7 @@ use crate::{
     regs::{PrfEntry, RegFile},
     util::Addr,
 };
-use std::{fmt::Debug, ops::Add, str::FromStr};
+use std::{fmt::Debug, str::FromStr};
 use strum::{self, EnumIter, EnumString};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -62,8 +62,11 @@ pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> 
     Halt, // Used internally when execution finishes.
 }
 
-pub type Tag = u64;
-pub type PhysReg = Tag;
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Tag(u64);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct PhysReg(i32);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueOrReg {
@@ -366,15 +369,51 @@ impl FromStr for MemRef {
     }
 }
 
-impl<RegType: Debug + Clone + Add<u32, Output = u32>> MemRef<RegType> {
+impl MemRef<u32> {
     pub fn compute_addr(self) -> Addr {
-        Addr(self.base + self.offset.0)
+        Addr(self.base.wrapping_add(self.offset.0))
     }
 }
 
 impl Default for ArchReg {
     fn default() -> Self {
         ArchReg::Zero
+    }
+}
+
+impl From<u64> for Tag {
+    fn from(x: u64) -> Self {
+        Self(x)
+    }
+}
+
+impl Default for PhysReg {
+    fn default() -> Self {
+        PhysReg::none()
+    }
+}
+
+impl PhysReg {
+    pub fn none() -> Self {
+        Self(-1)
+    }
+}
+
+impl From<i32> for PhysReg {
+    fn from(x: i32) -> Self {
+        Self(x)
+    }
+}
+
+impl From<usize> for PhysReg {
+    fn from(x: usize) -> Self {
+        Self(x.try_into().unwrap())
+    }
+}
+
+impl From<PhysReg> for usize {
+    fn from(r: PhysReg) -> Self {
+        r.0.try_into().expect("could not convert PhysReg to usize")
     }
 }
 

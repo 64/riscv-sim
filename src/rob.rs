@@ -40,6 +40,7 @@ impl ReorderBuffer {
             == Some(tag)
     }
 
+    #[must_use]
     pub fn try_push(&mut self, tag: Tag, inst: Inst) -> Option<Inst> {
         self.rob
             .try_push(RobEntry {

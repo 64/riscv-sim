@@ -64,7 +64,7 @@ impl ExecutionUnit {
 
     fn compute_result(&self, inst: &ReadyInst, mem: &mut Memory) -> EuResult {
         let val = match inst {
-            Inst::AddImm(_, src, imm) => src + imm.0,
+            Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
             Inst::StoreWord(val, dst) => {
                 mem.writew(dst.compute_addr(), *val);
                 0

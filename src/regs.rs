@@ -66,7 +66,7 @@ impl RegFile {
             .prrt
             .pop_front()
             .expect("released PRRT entry when none was allocated");
-        self.phys_rf[usize::try_from(slot).unwrap()] = PrfEntry::Free;
+        self.phys_rf[usize::from(slot)] = PrfEntry::Free;
     }
 
     pub fn get_alias(&self, arch_reg: ArchReg) -> PhysReg {
@@ -85,7 +85,7 @@ impl RegFile {
     }
 
     pub fn set_phys_active(&mut self, phys_reg: PhysReg, val: u32) {
-        self.phys_rf[usize::try_from(phys_reg).unwrap()] = PrfEntry::Active(val);
+        self.phys_rf[usize::from(phys_reg)] = PrfEntry::Active(val);
     }
 
     pub fn set_alias(&mut self, arch_reg: ArchReg, phys_reg: PhysReg) {

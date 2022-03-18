@@ -1,4 +1,4 @@
-use std::collections::{HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     cpu::{Cpu, ExecResult},
@@ -11,7 +11,7 @@ use crate::{
 };
 
 mod stages {
-    use crate::inst::{ExecutedInst};
+    use crate::inst::ExecutedInst;
 
     use super::*;
 
@@ -32,7 +32,7 @@ mod stages {
 
     #[derive(Debug, Clone, Default)]
     pub struct Writeback {
-        pub inst: Option<ExecutedInst>,
+        pub inst: Option<(Tag, ExecutedInst)>,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -58,7 +58,7 @@ pub struct OutOfOrder {
     mem: Memory,
     prog: Program,
     execution_units: Vec<ExecutionUnit>,
-    reservation_station: HashMap<Tag, RenamedInst>,
+    reservation_station: BTreeMap<Tag, RenamedInst>,
     rob: ReorderBuffer,
     reg_file: RegFile,
     cycles: u64,
@@ -165,7 +165,7 @@ impl OutOfOrder {
             if dst_reg == ArchReg::Zero {
                 BothReg {
                     arch: ArchReg::Zero,
-                    phys: 0, // Doesn't matter, (?)
+                    phys: PhysReg::none(), // Doesn't matter, (?)
                 }
             } else if let Some(slot) = self.reg_file.allocate_phys() {
                 self.reg_file.set_alias(dst_reg, slot);
@@ -265,12 +265,14 @@ impl OutOfOrder {
         for eu in &mut self.execution_units {
             if let Some((inst, tag, result)) = eu.take_complete() {
                 // Only allow writeback of 1 instruction per cycle, for now.
-                let mut completed_reg = 0;
+                let mut completed_reg = PhysReg::none();
 
                 match &inst {
                     Inst::AddImm(dst, _, _) | Inst::LoadWord(dst, _) => {
-                        completed_reg = dst.phys;
-                        self.reg_file.set_phys_active(dst.phys, result.val);
+                        if dst.arch != ArchReg::Zero {
+                            completed_reg = dst.phys;
+                            self.reg_file.set_phys_active(dst.phys, result.val);
+                        }
                     }
                     Inst::StoreWord(_, _) | Inst::Halt => (),
                     _ => unimplemented!("{:?}", inst),
@@ -287,18 +289,24 @@ impl OutOfOrder {
                     });
                 }
 
-                self.rob.mark_complete(tag);
-
-                return stages::Writeback { inst: Some(inst) };
+                return stages::Writeback {
+                    inst: Some((tag, inst)),
+                };
             }
         }
 
         stages::Writeback { inst: None }
     }
 
-    fn stage_commit(&mut self, _pipe: &Pipeline) -> stages::Commit {
+    fn stage_commit(&mut self, pipe: &Pipeline) -> stages::Commit {
         // Commit instructions from the ROB to architectural state.
-        let inst = match self.rob.try_pop() {
+        let inst = self.rob.try_pop();
+
+        if let Some((tag, _)) = pipe.writeback.inst {
+            self.rob.mark_complete(tag);
+        }
+
+        let inst = match inst {
             i @ Some(Inst::Halt) => {
                 return stages::Commit {
                     inst: i,

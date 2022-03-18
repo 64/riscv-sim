@@ -1,7 +1,6 @@
 pub mod cpu;
 pub mod emulated;
 pub mod execution_unit;
-pub mod hazard;
 pub mod inst;
 pub mod mem;
 pub mod out_of_order;

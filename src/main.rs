@@ -1,7 +1,6 @@
 mod cpu;
 mod emulated;
 mod execution_unit;
-mod hazard;
 mod inst;
 mod mem;
 mod out_of_order;
@@ -29,7 +28,8 @@ fn main() {
         .expect("failed to parse program");
 
     // let res = emulated::Emulated::new(prog, HashMap::new(), Memory::new()).exec_all();
-    let res = pipelined::Pipelined::new(prog, HashMap::new(), Memory::new()).exec_all();
+    // let res = pipelined::Pipelined::new(prog, HashMap::new(), Memory::new()).exec_all();
+    let res = out_of_order::OutOfOrder::new(prog, HashMap::new(), Memory::new()).exec_all();
     dbg!(&res);
 
     println!("    EXECUTION COMPLETED");
