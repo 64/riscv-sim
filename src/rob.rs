@@ -1,5 +1,5 @@
 use crate::{
-    inst::{Inst, Tag},
+    inst::{Inst, Tag, Tagged},
     queue::Queue,
 };
 
@@ -51,14 +51,17 @@ impl ReorderBuffer {
             .map(|ent| ent.inst)
     }
 
-    pub fn try_pop(&mut self) -> Option<Inst> {
+    pub fn try_pop(&mut self) -> Option<Tagged<Inst>> {
         if self
             .rob
             .front()
             .map(|ent| ent.status == RobStatus::Executed)
             .unwrap_or(false)
         {
-            self.rob.try_pop().map(|ent| ent.inst)
+            self.rob.try_pop().map(|ent| Tagged {
+                tag: ent.tag,
+                inst: ent.inst,
+            })
         } else {
             None
         }

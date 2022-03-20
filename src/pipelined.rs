@@ -27,6 +27,7 @@ mod stages {
     pub struct Execute {
         pub inst: Option<Inst>,
         pub should_stall: bool,
+        // pub cycles_spent: u64,
         pub alu_or_mem_val: u32,
         pub mem_addr: Addr,
     }
@@ -267,15 +268,12 @@ impl Pipelined {
                 val = self.mem.readw(addr);
             }
             Inst::StoreByte(_, _) => {
-                eprintln!("writing {} to {:?}", val, addr);
                 self.mem.writeb(addr, val);
             }
             Inst::StoreHalfWord(_, _) => {
-                eprintln!("writing {} to {:?}", val, addr);
                 self.mem.writeh(addr, val);
             }
             Inst::StoreWord(_, _) => {
-                eprintln!("writing {} to {:?}", val, addr);
                 self.mem.writew(addr, val);
             }
             ref x => debug_assert!(!x.is_mem_access()),
@@ -317,7 +315,6 @@ impl Pipelined {
             | Inst::Add(dst, _, _)
             | Inst::AddImm(dst, _, _) => {
                 self.regs.set(dst, val);
-                eprintln!("writing back {} to {:?}", val, dst);
             }
             Inst::BranchIfNotEqual(_, _, ref dst)
             | Inst::BranchIfEqual(_, _, ref dst)

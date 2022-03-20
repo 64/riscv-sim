@@ -1,5 +1,5 @@
 use crate::{
-    inst::{ExecutedInst, Inst, ReadyInst, Tag},
+    inst::{ExecutedInst, Inst, ReadyInst, Tag, Tagged},
     mem::Memory,
 };
 
@@ -20,9 +20,9 @@ type CyclesTaken = u64;
 #[derive(Debug, Clone)]
 pub struct ExecutionUnit {
     eu_type: EuType,
-    begin_inst: Option<(ReadyInst, Tag)>,
-    executing_inst: Option<(ReadyInst, Tag, CyclesTaken)>,
-    completed_inst: Option<(ExecutedInst, Tag, EuResult)>,
+    begin_inst: Option<Tagged<ReadyInst>>,
+    executing_inst: Option<(Tagged<ReadyInst>, CyclesTaken)>,
+    completed_inst: Option<(Tagged<ExecutedInst>, EuResult)>,
 }
 
 impl ExecutionUnit {
@@ -41,36 +41,38 @@ impl ExecutionUnit {
 
     pub fn begin_execute(&mut self, inst: ReadyInst, tag: Tag) {
         debug_assert!(self.can_execute(&inst));
-        self.begin_inst = Some((inst, tag));
+        self.begin_inst = Some(Tagged { tag, inst });
     }
 
     pub fn advance(&mut self, mem: &mut Memory) {
-        if let Some((inst, tag, cycles)) = self.executing_inst.take() {
+        if let Some((Tagged { tag, inst }, cycles)) = self.executing_inst.take() {
             if cycles + 1 >= inst.latency() && self.completed_inst.is_none() {
                 let res = self.compute_result(&inst, mem);
-                self.completed_inst = Some((inst.executed(), tag, res));
+                self.completed_inst = Some((
+                    Tagged {
+                        tag,
+                        inst: inst.executed(),
+                    },
+                    res,
+                ));
             } else {
                 // Increment cycles, and carry on.
-                self.executing_inst = Some((inst, tag, cycles + 1));
+                self.executing_inst = Some((Tagged { tag, inst }, cycles + 1));
             }
-        } else if let Some((inst, tag)) = self.begin_inst.take() {
-            self.executing_inst = Some((inst, tag, 0));
+        } else if let Some(tagged) = self.begin_inst.take() {
+            self.executing_inst = Some((tagged, 0));
         }
     }
 
-    pub fn take_complete(&mut self) -> Option<(ExecutedInst, Tag, EuResult)> {
+    pub fn take_complete(&mut self) -> Option<(Tagged<ExecutedInst>, EuResult)> {
         self.completed_inst.take()
     }
 
     fn compute_result(&self, inst: &ReadyInst, mem: &mut Memory) -> EuResult {
         let val = match inst {
             Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
-            Inst::StoreWord(val, dst) => {
-                mem.writew(dst.compute_addr(), *val);
-                0
-            }
             Inst::LoadWord(_, src) => mem.readw(src.compute_addr()),
-            Inst::Halt => 0,
+            Inst::StoreWord(_, _) | Inst::Halt => 0, // Stores are handled by LSQ upon retire.
             _ => unimplemented!("{:?}", inst),
         };
 

@@ -1,7 +1,7 @@
 use strum::IntoEnumIterator;
 
 use crate::{
-    inst::{ArchReg, MemRef, PhysReg},
+    inst::{ArchReg, BothReg, Inst, MemRef, PhysReg, RenamedInst, ValueOrReg},
     util::Addr,
 };
 use std::collections::{HashMap, VecDeque};
@@ -55,9 +55,6 @@ impl RegFile {
         let slot = self.phys_rf.iter().position(|&r| r == PrfEntry::Free)?;
         self.phys_rf[slot] = PrfEntry::Reserved;
 
-        // Allocate an entry in the PRRT.
-        self.prrt.push_back(slot.try_into().unwrap());
-
         Some(PhysReg::try_from(slot).unwrap())
     }
 
@@ -80,7 +77,7 @@ impl RegFile {
     pub fn get_phys(&self, phys_reg: PhysReg) -> PrfEntry {
         *self
             .phys_rf
-            .get(usize::try_from(phys_reg).unwrap())
+            .get(usize::from(phys_reg))
             .expect("phys reg out of bounds")
     }
 
@@ -95,6 +92,46 @@ impl RegFile {
         }
 
         self.rat.insert(arch_reg, phys_reg);
+    }
+
+    pub fn perform_rename(&mut self, inst: Inst) -> Option<RenamedInst> {
+        let mut should_stall = false;
+
+        let renamed_inst = inst.clone().map_src_regs(|src_reg| match src_reg {
+            ArchReg::Zero => ValueOrReg::Value(0),
+            src_reg => ValueOrReg::Reg(self.get_alias(src_reg)),
+        });
+        let renamed_inst = renamed_inst.map_dst_regs(|dst_reg| {
+            if dst_reg == ArchReg::Zero {
+                BothReg {
+                    arch: ArchReg::Zero,
+                    phys: PhysReg::none(),
+                }
+            } else if let Some(slot) = self.allocate_phys() {
+                // Prepare the old PhysReg for reclaim.
+                let old_phys = self.get_alias(dst_reg);
+                self.prrt.push_back(old_phys);
+
+                self.set_alias(dst_reg, slot);
+                BothReg {
+                    arch: dst_reg,
+                    phys: slot,
+                }
+            } else {
+                should_stall = true; // PRF full.
+
+                BothReg {
+                    arch: dst_reg,
+                    phys: PhysReg::default(),
+                }
+            }
+        });
+
+        if should_stall {
+            None
+        } else {
+            Some(renamed_inst)
+        }
     }
 }
 

@@ -65,6 +65,12 @@ pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Tag(u64);
 
+#[derive(Debug, Clone)]
+pub struct Tagged<I> {
+    pub tag: Tag,
+    pub inst: I,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct PhysReg(i32);
 
@@ -188,6 +194,20 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
         self.eu_type() == EuType::LoadStore
     }
 
+    pub fn is_load(&self) -> bool {
+        match self {
+            Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_store(&self) -> bool {
+        match self {
+            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => true,
+            _ => false,
+        }
+    }
+
     pub fn eu_type(&self) -> EuType {
         match self {
             Inst::JumpAndLink(_, _)
@@ -215,7 +235,7 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
             | Inst::BranchIfGreaterEqual(_, _, _) => 1,
             Inst::Add(_, _, _) | Inst::AddImm(_, _, _) | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
             Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _) => 2,
-            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => 2,
+            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => 1, // Doesn't actually matter.
             Inst::Halt => 0,
         }
     }

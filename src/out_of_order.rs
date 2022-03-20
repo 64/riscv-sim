@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, HashMap};
 use crate::{
     cpu::{Cpu, ExecResult},
     execution_unit::{EuType, ExecutionUnit},
-    inst::{ArchReg, BothReg, Inst, PhysReg, RenamedInst, Tag, ValueOrReg},
+    inst::{ArchReg, BothReg, Inst, PhysReg, RenamedInst, Tag, Tagged, ValueOrReg},
+    lsq::LoadStoreQueue,
     mem::Memory,
     program::Program,
     regs::RegFile,
@@ -11,7 +12,7 @@ use crate::{
 };
 
 mod stages {
-    use crate::inst::ExecutedInst;
+    use crate::inst::{ExecutedInst, Tagged};
 
     use super::*;
 
@@ -32,7 +33,7 @@ mod stages {
 
     #[derive(Debug, Clone, Default)]
     pub struct Writeback {
-        pub inst: Option<(Tag, ExecutedInst)>,
+        pub inst: Option<Tagged<ExecutedInst>>,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -59,6 +60,7 @@ pub struct OutOfOrder {
     prog: Program,
     execution_units: Vec<ExecutionUnit>,
     reservation_station: BTreeMap<Tag, RenamedInst>,
+    lsq: LoadStoreQueue,
     rob: ReorderBuffer,
     reg_file: RegFile,
     cycles: u64,
@@ -72,10 +74,12 @@ impl Cpu for OutOfOrder {
             prog,
             execution_units: vec![
                 ExecutionUnit::new(EuType::ALU),
+                ExecutionUnit::new(EuType::ALU),
                 ExecutionUnit::new(EuType::LoadStore),
                 ExecutionUnit::new(EuType::Special),
             ],
             rob: ReorderBuffer::new(20),
+            lsq: LoadStoreQueue::new(10, 10),
             reservation_station: Default::default(),
             reg_file: RegFile::new(regs, 32),
             rs_max: 10,
@@ -155,46 +159,36 @@ impl OutOfOrder {
             return true;
         }
 
-        let mut should_stall = false;
-
-        let renamed_inst = inst.clone().map_src_regs(|src_reg| match src_reg {
-            ArchReg::Zero => ValueOrReg::Value(0),
-            src_reg => ValueOrReg::Reg(self.reg_file.get_alias(src_reg)),
-        });
-        let renamed_inst = renamed_inst.map_dst_regs(|dst_reg| {
-            if dst_reg == ArchReg::Zero {
-                BothReg {
-                    arch: ArchReg::Zero,
-                    phys: PhysReg::none(), // Doesn't matter, (?)
-                }
-            } else if let Some(slot) = self.reg_file.allocate_phys() {
-                self.reg_file.set_alias(dst_reg, slot);
-                BothReg {
-                    arch: dst_reg,
-                    phys: slot,
-                }
-            } else {
-                should_stall = true; // PRF full, need to stall.
-                BothReg {
-                    arch: dst_reg,
-                    phys: PhysReg::default(),
-                }
-            }
-        });
-
-        if should_stall {
+        if inst.is_mem_access() && !self.lsq.has_space(&inst) {
             return true;
         }
 
-        assert_eq!(self.rob.try_push(tag, inst), None);
-        assert_eq!(self.reservation_station.insert(tag, renamed_inst), None);
-        false
+        if let Some(renamed_inst) = self.reg_file.perform_rename(inst.clone()) {
+            assert_eq!(self.rob.try_push(tag, inst), None);
+            assert_eq!(
+                self.reservation_station.insert(tag, renamed_inst.clone()),
+                None
+            );
+
+            if renamed_inst.is_mem_access() {
+                self.lsq.insert_access(renamed_inst, tag);
+            }
+
+            false
+        } else {
+            true // Renaming failed because we need to stall.
+        }
     }
 
     fn issue(&mut self, inst: Inst) -> bool {
         // Try to issue more instructions to reservation stations.
         let mut remove_tags = vec![];
 
+        if self.rename_and_reserve(inst) {
+            return true;
+        }
+
+        // TODO: improve this logic.
         for (tag, ready_inst) in self
             .reservation_station
             .iter()
@@ -205,8 +199,7 @@ impl OutOfOrder {
                 .iter_mut()
                 .find(|eu| eu.can_execute(&ready_inst))
             {
-                // Enforce that stores and loads must execute in program order.
-                if ready_inst.is_mem_access() && !self.rob.is_earliest_mem_access(tag) {
+                if ready_inst.is_load() && !self.lsq.can_execute_load(tag) {
                     continue;
                 }
 
@@ -217,10 +210,6 @@ impl OutOfOrder {
 
         for tag in remove_tags {
             self.reservation_station.remove(&tag);
-        }
-
-        if self.rename_and_reserve(inst) {
-            return true;
         }
 
         false
@@ -236,22 +225,17 @@ impl OutOfOrder {
     }
 
     fn stage_decode_issue(&mut self, pipe: &Pipeline) -> stages::DecodeIssue {
-        let inst = match &pipe.fetch.inst {
-            Some(inst) => inst.clone(),
-            None => return Default::default(),
-        };
-
-        // Give instruction to the scheduler to rename and be placed into an execution unit.
-        let should_stall = self.issue(inst.clone());
-
-        stages::DecodeIssue {
-            inst: Some(inst),
-            should_stall,
+        match &pipe.fetch.inst {
+            Some(inst) => stages::DecodeIssue {
+                inst: Some(inst.clone()),
+                should_stall: self.issue(inst.clone()),
+            },
+            None => Default::default(),
         }
     }
 
+    // Advance execution of all the execution units.
     fn stage_execute(&mut self, _pipe: &Pipeline) -> stages::Execute {
-        // Advance execution of all the execution units.
         for eu in &mut self.execution_units {
             eu.advance(&mut self.mem);
         }
@@ -259,18 +243,14 @@ impl OutOfOrder {
         stages::Execute
     }
 
+    // Take output of the execution units and write into the register file.
     fn stage_writeback(&mut self, _pipe: &Pipeline) -> stages::Writeback {
-        // Take output of the execution units and write into the ROB.
-
         for eu in &mut self.execution_units {
-            if let Some((inst, tag, result)) = eu.take_complete() {
+            if let Some((Tagged { tag, inst }, result)) = eu.take_complete() {
                 // Only allow writeback of 1 instruction per cycle, for now.
-                let mut completed_reg = PhysReg::none();
-
                 match &inst {
                     Inst::AddImm(dst, _, _) | Inst::LoadWord(dst, _) => {
                         if dst.arch != ArchReg::Zero {
-                            completed_reg = dst.phys;
                             self.reg_file.set_phys_active(dst.phys, result.val);
                         }
                     }
@@ -278,19 +258,8 @@ impl OutOfOrder {
                     _ => unimplemented!("{:?}", inst),
                 }
 
-                // Broadcast tag of completed instruction to waiting instructions.
-                for (_, waiting_inst) in self.reservation_station.iter_mut() {
-                    *waiting_inst = waiting_inst.clone().map_src_regs(|src_reg| {
-                        if src_reg == ValueOrReg::Reg(completed_reg) {
-                            ValueOrReg::Value(result.val)
-                        } else {
-                            src_reg
-                        }
-                    });
-                }
-
                 return stages::Writeback {
-                    inst: Some((tag, inst)),
+                    inst: Some(Tagged { tag, inst }),
                 };
             }
         }
@@ -298,23 +267,27 @@ impl OutOfOrder {
         stages::Writeback { inst: None }
     }
 
+    // Commit instructions from the ROB to architectural state.
     fn stage_commit(&mut self, pipe: &Pipeline) -> stages::Commit {
-        // Commit instructions from the ROB to architectural state.
-        let inst = self.rob.try_pop();
+        let tagged = self.rob.try_pop();
 
-        if let Some((tag, _)) = pipe.writeback.inst {
-            self.rob.mark_complete(tag);
+        // Mark the written back instructions as completed now, to simulate 1 cycle of delay
+        // between writeback and commit.
+        if let Some(tagged) = &pipe.writeback.inst {
+            self.rob.mark_complete(tagged.tag);
         }
 
-        let inst = match inst {
-            i @ Some(Inst::Halt) => {
+        let Tagged { tag, inst } = match tagged {
+            Some(Tagged {
+                inst: Inst::Halt, ..
+            }) => {
                 return stages::Commit {
-                    inst: i,
+                    inst: Some(Inst::Halt),
                     should_halt: true,
                     retire: false,
                 }
             }
-            Some(inst) => inst,
+            Some(tagged) => tagged,
             None => return Default::default(),
         };
 
@@ -324,7 +297,7 @@ impl OutOfOrder {
                     self.reg_file.release_phys();
                 }
             }
-            Inst::StoreWord(_, _) => (),
+            Inst::StoreWord(_, _) => self.lsq.submit_store(tag, &self.reg_file, &mut self.mem),
             _ => unimplemented!("{:?}", inst),
         }
 

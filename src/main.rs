@@ -2,6 +2,7 @@ mod cpu;
 mod emulated;
 mod execution_unit;
 mod inst;
+mod lsq;
 mod mem;
 mod out_of_order;
 mod pipelined;
