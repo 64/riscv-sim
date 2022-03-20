@@ -32,14 +32,6 @@ impl ReorderBuffer {
         self.rob.is_full()
     }
 
-    pub fn is_earliest_mem_access(&self, tag: Tag) -> bool {
-        self.rob
-            .iter()
-            .find(|ent| ent.inst.is_mem_access())
-            .map(|ent| ent.tag)
-            == Some(tag)
-    }
-
     #[must_use]
     pub fn try_push(&mut self, tag: Tag, inst: Inst) -> Option<Inst> {
         self.rob
@@ -68,11 +60,12 @@ impl ReorderBuffer {
     }
 
     pub fn mark_complete(&mut self, tag: Tag) {
-        let rob_entry = self
+        let ent = self
             .rob
             .iter_mut()
             .find(|ent| ent.tag == tag)
             .expect("no entry found in ROB");
-        rob_entry.status = RobStatus::Executed;
+
+        ent.status = RobStatus::Executed;
     }
 }

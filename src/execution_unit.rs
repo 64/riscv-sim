@@ -72,7 +72,11 @@ impl ExecutionUnit {
         let val = match inst {
             Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
             Inst::LoadWord(_, src) => mem.readw(src.compute_addr()),
-            Inst::StoreWord(_, _) | Inst::Halt => 0, // Stores are handled by LSQ upon retire.
+            Inst::BranchIfEqual(src0, src1, _) => (src0 == src1).into(),
+            Inst::BranchIfNotEqual(src0, src1, _) => (src0 != src1).into(),
+            Inst::BranchIfGreaterEqual(src0, src1, _) => (src0 >= src1).into(),
+            Inst::Halt => 0,
+            x if x.is_store() => 0, // Stores are handled by LSQ upon retire.
             _ => unimplemented!("{:?}", inst),
         };
 

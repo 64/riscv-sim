@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::{
+    branch::{BranchPredictor, BranchTargetBuffer},
     cpu::{Cpu, ExecResult},
     execution_unit::{EuType, ExecutionUnit},
-    inst::{ArchReg, BothReg, Inst, PhysReg, RenamedInst, Tag, Tagged, ValueOrReg},
+    inst::{ArchReg, Inst, RenamedInst, Tag, Tagged},
     lsq::LoadStoreQueue,
     mem::Memory,
     program::Program,
@@ -62,6 +63,8 @@ pub struct OutOfOrder {
     reservation_station: BTreeMap<Tag, RenamedInst>,
     lsq: LoadStoreQueue,
     rob: ReorderBuffer,
+    btb: BranchTargetBuffer,
+    branch_predictor: BranchPredictor,
     reg_file: RegFile,
     cycles: u64,
     rs_max: usize,
@@ -82,6 +85,8 @@ impl Cpu for OutOfOrder {
             lsq: LoadStoreQueue::new(10, 10),
             reservation_station: Default::default(),
             reg_file: RegFile::new(regs, 32),
+            btb: BranchTargetBuffer::new(50),
+            branch_predictor: BranchPredictor::new(),
             rs_max: 10,
             cycles: 0,
         }
@@ -180,47 +185,19 @@ impl OutOfOrder {
         }
     }
 
-    fn issue(&mut self, inst: Inst) -> bool {
-        // Try to issue more instructions to reservation stations.
-        let mut remove_tags = vec![];
-
-        if self.rename_and_reserve(inst) {
-            return true;
-        }
-
-        // TODO: improve this logic.
-        for (tag, ready_inst) in self
-            .reservation_station
-            .iter()
-            .filter_map(|(&tag, inst)| inst.get_ready(&self.reg_file).map(|inst| (tag, inst)))
-        {
-            if let Some(eu) = self
-                .execution_units
-                .iter_mut()
-                .find(|eu| eu.can_execute(&ready_inst))
-            {
-                if ready_inst.is_load() && !self.lsq.can_execute_load(tag) {
-                    continue;
-                }
-
-                remove_tags.push(tag);
-                eu.begin_execute(ready_inst, tag);
-            }
-        }
-
-        for tag in remove_tags {
-            self.reservation_station.remove(&tag);
-        }
-
-        false
-    }
-
     fn stage_fetch(&mut self, pipe: &Pipeline) -> stages::Fetch {
         let fetch_or_halt = |pc| self.prog.fetch(pc).cloned().unwrap_or(Inst::Halt);
 
+        // Branch prediction
+        let pc = pipe.fetch.next_pc;
+        let next_pc = match self.btb.get(pc) {
+            Some(target) if self.branch_predictor.predict_taken(pc, target) => target,
+            _ => pc + 1,
+        };
+
         stages::Fetch {
-            inst: Some(fetch_or_halt(pipe.fetch.next_pc)),
-            next_pc: pipe.fetch.next_pc + 1, // TODO: branch prediction
+            inst: Some(fetch_or_halt(pc)),
+            next_pc,
         }
     }
 
@@ -253,6 +230,11 @@ impl OutOfOrder {
                         if dst.arch != ArchReg::Zero {
                             self.reg_file.set_phys_active(dst.phys, result.val);
                         }
+                    }
+                    Inst::BranchIfEqual(_, _, tgt)
+                    | Inst::BranchIfNotEqual(_, _, tgt)
+                    | Inst::BranchIfGreaterEqual(_, _, tgt) => {
+                        todo!(); // Check if our prediction was correct.
                     }
                     Inst::StoreWord(_, _) | Inst::Halt => (),
                     _ => unimplemented!("{:?}", inst),
@@ -306,5 +288,50 @@ impl OutOfOrder {
             should_halt: false,
             retire: true,
         }
+    }
+
+    fn issue(&mut self, inst: Inst) -> bool {
+        // Try to issue more instructions to reservation stations.
+        let mut remove_tags = vec![];
+
+        if self.rename_and_reserve(inst) {
+            return true;
+        }
+
+        // TODO: improve this logic.
+        for (tag, ready_inst) in self
+            .reservation_station
+            .iter()
+            .filter_map(|(&tag, inst)| inst.get_ready(&self.reg_file).map(|inst| (tag, inst)))
+        {
+            if ready_inst.is_load() && !self.lsq.can_execute_load(tag) {
+                continue;
+            }
+
+            if let Some(eu) = self
+                .execution_units
+                .iter_mut()
+                .find(|eu| eu.can_execute(&ready_inst))
+            {
+                remove_tags.push(tag);
+                eu.begin_execute(ready_inst, tag);
+            }
+        }
+
+        for tag in remove_tags {
+            self.reservation_station.remove(&tag);
+        }
+
+        false
+    }
+
+    /// Get a reference to the out of order's branch predictor.
+    pub fn branch_predictor(&self) -> &BranchPredictor {
+        &self.branch_predictor
+    }
+
+    /// Get a reference to the out of order's btb.
+    pub fn btb(&self) -> &BranchTargetBuffer {
+        &self.btb
     }
 }

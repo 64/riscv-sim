@@ -11,3 +11,4 @@ pub mod queue;
 pub mod regs;
 pub mod rob;
 pub mod util;
+pub mod branch;
