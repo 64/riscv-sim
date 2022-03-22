@@ -13,7 +13,7 @@ mod regs;
 mod rob;
 mod util;
 
-use crate::{cpu::Cpu, mem::Memory};
+use crate::{cpu::Cpu, inst::ArchReg, mem::Memory};
 use std::{collections::HashMap, time::Instant};
 
 fn main() {
@@ -22,6 +22,7 @@ fn main() {
     let file = std::env::args()
         .nth(1)
         .expect("required input file as argument argument");
+
     let contents =
         std::fs::read_to_string(&format!("asm/{}.asm", file)).expect("failed to open file");
 
@@ -29,9 +30,15 @@ fn main() {
         .parse::<program::Program>()
         .expect("failed to parse program");
 
-    // let res = emulated::Emulated::new(prog, HashMap::new(), Memory::new()).exec_all();
-    // let res = pipelined::Pipelined::new(prog, HashMap::new(), Memory::new()).exec_all();
-    let res = out_of_order::OutOfOrder::new(prog, HashMap::new(), Memory::new()).exec_all();
+    let a0 = std::env::args()
+        .nth(2)
+        .and_then(|x| x.parse::<u32>().ok())
+        .unwrap_or(0);
+    let initial_regs = HashMap::from([(ArchReg::A0, a0)]);
+
+    // let res = emulated::Emulated::new(prog, initial_regs, Memory::new()).exec_all();
+    // let res = pipelined::Pipelined::new(prog, initial_regs, Memory::new()).exec_all();
+    let res = out_of_order::OutOfOrder::new(prog, initial_regs, Memory::new()).exec_all();
     dbg!(&res);
 
     println!("    EXECUTION COMPLETED");

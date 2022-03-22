@@ -89,7 +89,7 @@ impl Cpu for OutOfOrder {
             rob: ReorderBuffer::new(20),
             lsq: LoadStoreQueue::new(10, 10),
             reservation_station: Default::default(),
-            reg_file: RegFile::new(regs, 18),
+            reg_file: RegFile::new(regs, 32),
             branch_predictor: BranchPredictor::new(),
             rs_max: 10,
             cycles: 0,

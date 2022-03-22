@@ -5,6 +5,10 @@ edition = "2021"
 
 [features]
 
+[profile.release]
+debug = false
+# debug = true
+
 [dependencies]
 lru-mem = "0.2.0"
 strum = { version = "0.24", features = ["derive"] }
