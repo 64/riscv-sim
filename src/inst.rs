@@ -4,10 +4,13 @@ use crate::{
     util::Addr,
 };
 use lru_mem::HeapSize;
-use std::{fmt::Debug, str::FromStr};
+use std::{
+    fmt::{self, Debug},
+    str::FromStr,
+};
 use strum::{self, EnumIter, EnumString};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Imm(pub u32);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,15 +58,19 @@ pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> 
     StoreWord(SrcReg, MemRef<SrcReg>),
     Add(DstReg, SrcReg, SrcReg),
     AddImm(DstReg, SrcReg, Imm),
+    AndImm(DstReg, SrcReg, Imm),
     ShiftLeftLogicalImm(DstReg, SrcReg, Imm),
-    JumpAndLink(DstReg, Imm),
+    Rem(DstReg, SrcReg, SrcReg),
+    Jump(Label),
+    JumpAndLink(DstReg, Label),
     BranchIfEqual(SrcReg, SrcReg, Label),
     BranchIfNotEqual(SrcReg, SrcReg, Label),
     BranchIfGreaterEqual(SrcReg, SrcReg, Label),
+    BranchIfLess(SrcReg, SrcReg, Label),
     Halt, // Used internally when execution finishes.
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Tag(u64);
 
 #[derive(Debug, Clone)]
@@ -72,7 +79,7 @@ pub struct Tagged<I> {
     pub inst: I,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PhysReg(i32);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,14 +132,19 @@ impl FromStr for Inst {
             "sw" => Inst::StoreWord(reg_arg(0)?, mem_arg(1)?),
             "add" => Inst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "addi" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "andi" => Inst::AndImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "slli" => Inst::ShiftLeftLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "rem" => Inst::Rem(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "li" => Inst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
             "mv" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, Imm(0)),
-            "jal" => Inst::JumpAndLink(reg_arg(0)?, imm_arg(1)?),
+            "j" => Inst::Jump(label_arg(0)?),
+            "jal" => Inst::JumpAndLink(reg_arg(0)?, label_arg(1)?),
             "beq" => Inst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bne" => Inst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bge" => Inst::BranchIfGreaterEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "ble" => Inst::BranchIfGreaterEqual(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
+            "blt" => Inst::BranchIfLess(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "bgt" => Inst::BranchIfLess(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
             "nop" => Inst::nop(),
             "ret" => todo!(),
             _ => return Err(format!("unknown instruction: '{}'", op)),
@@ -155,7 +167,9 @@ impl Inst {
         match self {
             Inst::Add(dst, _, _)
             | Inst::AddImm(dst, _, _)
+            | Inst::AndImm(dst, _, _)
             | Inst::ShiftLeftLogicalImm(dst, _, _)
+            | Inst::Rem(dst, _, _)
             | Inst::LoadByte(dst, _)
             | Inst::LoadHalfWord(dst, _)
             | Inst::LoadWord(dst, _)
@@ -163,6 +177,8 @@ impl Inst {
             Inst::BranchIfNotEqual(_, _, _)
             | Inst::BranchIfEqual(_, _, _)
             | Inst::BranchIfGreaterEqual(_, _, _)
+            | Inst::BranchIfLess(_, _, _)
+            | Inst::Jump(_)
             | Inst::StoreByte(_, _)
             | Inst::StoreHalfWord(_, _)
             | Inst::StoreWord(_, _)
@@ -174,20 +190,13 @@ impl Inst {
 impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
     pub fn is_branch(&self) -> bool {
         match self {
-            Inst::JumpAndLink(_, _)
+            Inst::Jump(_)
+            | Inst::JumpAndLink(_, _)
             | Inst::BranchIfNotEqual(_, _, _)
             | Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfLess(_, _, _)
             | Inst::BranchIfGreaterEqual(_, _, _) => true,
-            Inst::LoadByte(_, _)
-            | Inst::LoadHalfWord(_, _)
-            | Inst::LoadWord(_, _)
-            | Inst::StoreByte(_, _)
-            | Inst::StoreHalfWord(_, _)
-            | Inst::StoreWord(_, _)
-            | Inst::Add(_, _, _)
-            | Inst::AddImm(_, _, _)
-            | Inst::ShiftLeftLogicalImm(_, _, _)
-            | Inst::Halt => false,
+            _ => false,
         }
     }
 
@@ -211,13 +220,17 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
 
     pub fn eu_type(&self) -> EuType {
         match self {
-            Inst::JumpAndLink(_, _)
+            Inst::Jump(_)
+            | Inst::JumpAndLink(_, _)
             | Inst::BranchIfNotEqual(_, _, _)
             | Inst::BranchIfEqual(_, _, _)
-            | Inst::BranchIfGreaterEqual(_, _, _)
-            | Inst::Add(_, _, _)
+            | Inst::BranchIfLess(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _) => EuType::Branch,
+            Inst::Add(_, _, _)
             | Inst::AddImm(_, _, _)
-            | Inst::ShiftLeftLogicalImm(_, _, _) => EuType::ALU,
+            | Inst::AndImm(_, _, _)
+            | Inst::ShiftLeftLogicalImm(_, _, _)
+            | Inst::Rem(_, _, _) => EuType::ALU,
             Inst::LoadByte(_, _)
             | Inst::LoadHalfWord(_, _)
             | Inst::LoadWord(_, _)
@@ -230,11 +243,17 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
 
     pub fn latency(&self) -> u64 {
         match self {
-            Inst::JumpAndLink(_, _)
+            Inst::Jump(_)
+            | Inst::JumpAndLink(_, _)
             | Inst::BranchIfNotEqual(_, _, _)
             | Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfLess(_, _, _)
             | Inst::BranchIfGreaterEqual(_, _, _) => 1,
-            Inst::Add(_, _, _) | Inst::AddImm(_, _, _) | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
+            Inst::Add(_, _, _)
+            | Inst::AddImm(_, _, _)
+            | Inst::AndImm(_, _, _)
+            | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
+            Inst::Rem(_, _, _) => 3,
             Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _) => 4,
             Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => 4,
             Inst::Halt => 0,
@@ -256,7 +275,9 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
         Some(match self {
             Inst::Add(dst, src0, src1) => Inst::Add(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::AddImm(dst, src, imm) => Inst::AddImm(dst_fn(dst)?, src_fn(src)?, imm),
+            Inst::AndImm(dst, src, imm) => Inst::AndImm(dst_fn(dst)?, src_fn(src)?, imm),
             Inst::ShiftLeftLogicalImm(dst, src, imm) => Inst::ShiftLeftLogicalImm(dst_fn(dst)?, src_fn(src)?, imm),
+            Inst::Rem(dst, src0, src1) => Inst::Rem(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::LoadByte(dst, src) => Inst::LoadByte(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
             Inst::LoadHalfWord(dst, src) => Inst::LoadHalfWord(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
             Inst::LoadWord(dst, src) => Inst::LoadWord(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
@@ -267,6 +288,8 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
             Inst::BranchIfNotEqual(src0, src1, label) => Inst::BranchIfNotEqual(src_fn(src0)?, src_fn(src1)?, label),
             Inst::BranchIfEqual(src0, src1, label) => Inst::BranchIfEqual(src_fn(src0)?, src_fn(src1)?, label),
             Inst::BranchIfGreaterEqual(src0, src1, label)=> Inst::BranchIfGreaterEqual(src_fn(src0)?, src_fn(src1)?, label),
+            Inst::BranchIfLess(src0, src1, label)=> Inst::BranchIfLess(src_fn(src0)?, src_fn(src1)?, label),
+            Inst::Jump(label) => Inst::Jump(label),
             Inst::Halt => Inst::Halt,
         })
     }
@@ -408,6 +431,18 @@ impl From<u64> for Tag {
     }
 }
 
+impl fmt::Debug for Imm {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "Imm({})", self.0)
+    }
+}
+
+impl fmt::Debug for Tag {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "Tag({})", self.0)
+    }
+}
+
 impl Default for PhysReg {
     fn default() -> Self {
         PhysReg::none()
@@ -417,6 +452,12 @@ impl Default for PhysReg {
 impl PhysReg {
     pub fn none() -> Self {
         Self(-1)
+    }
+}
+
+impl fmt::Debug for PhysReg {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "PhysReg({})", self.0)
     }
 }
 

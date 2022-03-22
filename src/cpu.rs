@@ -1,4 +1,4 @@
-use crate::{inst::ArchReg, mem::Memory, program::Program};
+use crate::{inst::ArchReg, mem::Memory, program::Program, regs::RegSet};
 use std::collections::HashMap;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -10,6 +10,7 @@ pub enum CpuState {
 #[derive(Debug, Clone)]
 pub struct ExecResult {
     pub mem: Memory,
+    pub regs: RegSet,
     pub cycles_taken: u64,
     pub insts_retired: u64,
 }

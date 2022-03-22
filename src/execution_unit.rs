@@ -12,6 +12,7 @@ pub struct EuResult {
 pub enum EuType {
     ALU,
     LoadStore,
+    Branch,
     Special, // Halt and such.
 }
 
@@ -90,12 +91,20 @@ impl ExecutionUnit {
         let val = match inst {
             Inst::Add(_, src0, src1) => src0.wrapping_add(*src1),
             Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
+            Inst::AndImm(_, src, imm) => src & imm.0,
+            Inst::Rem(_, src0, src1) => {
+                if *src1 == 0 {
+                    *src0
+                } else {
+                    *src0 % *src1
+                }
+            }
             Inst::ShiftLeftLogicalImm(_, src, imm) => src.wrapping_shl(imm.0),
             Inst::LoadWord(_, src) => mem.readw(src.compute_addr()),
             Inst::BranchIfEqual(src0, src1, _) => (src0 == src1).into(),
             Inst::BranchIfNotEqual(src0, src1, _) => (src0 != src1).into(),
             Inst::BranchIfGreaterEqual(src0, src1, _) => (src0 >= src1).into(),
-            Inst::Halt => 0,
+            Inst::Jump(_) | Inst::Halt => 0,
             x if x.is_store() => 0, // Stores are handled by LSQ upon retire.
             _ => unimplemented!("{:?}", inst),
         };

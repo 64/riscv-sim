@@ -89,6 +89,7 @@ impl Cpu for Pipelined {
 
             if writeback.should_halt {
                 return ExecResult {
+                    regs: self.regs,
                     mem: self.mem,
                     cycles_taken: cycles,
                     insts_retired,
@@ -136,8 +137,7 @@ impl Cpu for Pipelined {
                 std::io::stdin().read_line(&mut String::new()).unwrap();
             }
 
-            // debug_assert!(cycles < 10, "infinite loop detected");
-            debug_assert!(cycles < 10_000, "infinite loop detected");
+            debug_assert!(cycles < 100_000, "infinite loop detected");
         }
     }
 }
@@ -212,11 +212,22 @@ impl Pipelined {
                 let b = imm.0;
                 out.alu_or_mem_val = a.wrapping_add(b);
             }
+            Inst::AndImm(_, src, imm) => {
+                let a = self.regs.get(src);
+                let b = imm.0;
+                out.alu_or_mem_val = a & b;
+            }
             Inst::ShiftLeftLogicalImm(_, src, imm) => {
                 let a = self.regs.get(src);
                 let b = imm.0;
                 out.alu_or_mem_val = a.wrapping_shl(b);
             }
+            Inst::Rem(_, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                out.alu_or_mem_val = if b == 0 { a } else { a % b };
+            }
+            Inst::Jump(_) => out.alu_or_mem_val = 1,
             Inst::BranchIfEqual(src0, src1, _) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
@@ -231,6 +242,11 @@ impl Pipelined {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 out.alu_or_mem_val = (a >= b).into();
+            }
+            Inst::BranchIfLess(src0, src1, _) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                out.alu_or_mem_val = (a < b).into();
             }
             Inst::LoadByte(_, addr) | Inst::LoadHalfWord(_, addr) | Inst::LoadWord(_, addr) => {
                 out.mem_addr = self.regs.ref_to_addr(addr);
@@ -314,11 +330,15 @@ impl Pipelined {
             | Inst::LoadHalfWord(dst, _)
             | Inst::LoadWord(dst, _)
             | Inst::Add(dst, _, _)
+            | Inst::Rem(dst, _, _)
+            | Inst::AndImm(dst, _, _)
             | Inst::AddImm(dst, _, _) => {
                 self.regs.set(dst, val);
             }
-            Inst::BranchIfNotEqual(_, _, ref dst)
+            Inst::Jump(ref dst)
+            | Inst::BranchIfNotEqual(_, _, ref dst)
             | Inst::BranchIfEqual(_, _, ref dst)
+            | Inst::BranchIfLess(_, _, ref dst)
             | Inst::BranchIfGreaterEqual(_, _, ref dst) => {
                 jump_target = if val != 0 {
                     Some(self.prog.labels[dst])
@@ -358,9 +378,13 @@ mod hazard {
             Inst::BranchIfNotEqual(src0, src1, _)
             | Inst::BranchIfEqual(src0, src1, _)
             | Inst::BranchIfGreaterEqual(src0, src1, _)
-            | Inst::Add(_, src0, src1) => b.writes_reg(src0) || b.writes_reg(src1),
-            Inst::ShiftLeftLogicalImm(_, src, _) | Inst::AddImm(_, src, _) => b.writes_reg(src),
-            Inst::JumpAndLink(_, _) | Inst::Halt => false,
+            | Inst::BranchIfLess(src0, src1, _)
+            | Inst::Add(_, src0, src1)
+            | Inst::Rem(_, src0, src1) => b.writes_reg(src0) || b.writes_reg(src1),
+            Inst::ShiftLeftLogicalImm(_, src, _)
+            | Inst::AddImm(_, src, _)
+            | Inst::AndImm(_, src, _) => b.writes_reg(src),
+            Inst::Jump(_) | Inst::JumpAndLink(_, _) | Inst::Halt => false,
         }
     }
 }

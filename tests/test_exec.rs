@@ -86,6 +86,23 @@ mod t {
         assert_eq!(res.mem.readw(Addr(4)), 2);
     }
 
+    #[test]
+    fn test_prime<C: Cpu>() {
+        let run = |x| {
+            parse_and_exec::<C>("prime", HashMap::from([(ArchReg::A0, x)]), Memory::new())
+                .regs
+                .get(ArchReg::A0)
+        };
+
+        assert_eq!(run(2), 1);
+        assert_eq!(run(3), 1);
+        assert_eq!(run(4), 0);
+        assert_eq!(run(5), 1);
+        assert_eq!(run(10), 0);
+        assert_eq!(run(100), 0);
+        assert_eq!(run(293), 1);
+    }
+
     #[instantiate_tests(<Emulated>)]
     mod emulated {}
 

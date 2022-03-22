@@ -42,7 +42,10 @@ impl<T: Clone> Queue<T> {
         self.data.iter_mut()
     }
 
-    pub fn retain<F>(&mut self, f: F) where F: FnMut(&T) -> bool {
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&T) -> bool,
+    {
         self.data.retain(f)
     }
 }

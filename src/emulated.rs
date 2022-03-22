@@ -41,6 +41,7 @@ impl Cpu for Emulated {
 
         ExecResult {
             mem: self.mem,
+            regs: self.regs,
             cycles_taken: self.cycles,
             insts_retired: self.insts_retired,
         }
@@ -91,37 +92,60 @@ impl Emulated {
                 let b = imm.0;
                 self.regs.set(dst, a.wrapping_add(b));
             }
+            Inst::AndImm(dst, src, imm) => {
+                let a = self.regs.get(src);
+                let b = imm.0;
+                self.regs.set(dst, a & b);
+            }
             Inst::ShiftLeftLogicalImm(dst, src, imm) => {
                 let a = self.regs.get(src);
                 let b = imm.0;
                 self.regs.set(dst, a.wrapping_shl(b));
             }
-            Inst::JumpAndLink(dst, ref offset) => {
-                self.regs.set(dst, self.pc + 1);
-                self.pc += offset.0;
+            Inst::Rem(dst, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                let val = if b == 0 { a } else { a % b };
+                self.regs.set(dst, val);
+            }
+            Inst::Jump(ref tgt) => {
+                self.pc = self.prog.labels[tgt];
                 advance_pc = false;
             }
-            Inst::BranchIfEqual(src0, src1, ref dst) => {
+            Inst::JumpAndLink(dst, ref tgt) => {
+                self.regs.set(dst, self.pc + 1);
+                self.pc = self.prog.labels[tgt];
+                advance_pc = false;
+            }
+            Inst::BranchIfEqual(src0, src1, ref tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a == b {
-                    self.pc = self.prog.labels[dst];
+                    self.pc = self.prog.labels[tgt];
                     advance_pc = false;
                 }
             }
-            Inst::BranchIfNotEqual(src0, src1, ref dst) => {
+            Inst::BranchIfNotEqual(src0, src1, ref tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a != b {
-                    self.pc = self.prog.labels[dst];
+                    self.pc = self.prog.labels[tgt];
                     advance_pc = false;
                 }
             }
-            Inst::BranchIfGreaterEqual(src0, src1, ref dst) => {
+            Inst::BranchIfGreaterEqual(src0, src1, ref tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a >= b {
-                    self.pc = self.prog.labels[dst];
+                    self.pc = self.prog.labels[tgt];
+                    advance_pc = false;
+                }
+            }
+            Inst::BranchIfLess(src0, src1, ref tgt) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                if a < b {
+                    self.pc = self.prog.labels[tgt];
                     advance_pc = false;
                 }
             }
