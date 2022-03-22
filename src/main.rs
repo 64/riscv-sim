@@ -1,3 +1,4 @@
+mod branch;
 mod cpu;
 mod emulated;
 mod execution_unit;
@@ -11,7 +12,6 @@ mod queue;
 mod regs;
 mod rob;
 mod util;
-mod branch;
 
 use crate::{cpu::Cpu, mem::Memory};
 use std::{collections::HashMap, time::Instant};

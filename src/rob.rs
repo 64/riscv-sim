@@ -59,6 +59,10 @@ impl ReorderBuffer {
         }
     }
 
+    pub fn kill_tags_after(&mut self, tag: Tag) {
+        self.rob.retain(|ent| ent.tag <= tag);
+    }
+
     pub fn mark_complete(&mut self, tag: Tag) {
         let ent = self
             .rob

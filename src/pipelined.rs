@@ -187,6 +187,7 @@ impl Pipelined {
         if hazard::read_after_write(&pipe.decode.inst, &pipe.execute.inst)
             || hazard::read_after_write(&pipe.decode.inst, &pipe.memory.inst)
         {
+            // TODO: Simulate instruction latency
             return stages::Execute {
                 should_stall: true,
                 ..Default::default()

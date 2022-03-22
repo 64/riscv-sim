@@ -68,9 +68,29 @@ impl ExecutionUnit {
         self.completed_inst.take()
     }
 
+    pub fn kill_tags_after(&mut self, tag: Tag) {
+        if let Some(tagged) = &self.begin_inst {
+            if tagged.tag > tag {
+                self.begin_inst = None;
+            }
+        }
+        if let Some((tagged, _)) = &self.executing_inst {
+            if tagged.tag > tag {
+                self.executing_inst = None;
+            }
+        }
+        if let Some((tagged, _)) = &self.completed_inst {
+            if tagged.tag > tag {
+                self.completed_inst = None;
+            }
+        }
+    }
+
     fn compute_result(&self, inst: &ReadyInst, mem: &mut Memory) -> EuResult {
         let val = match inst {
+            Inst::Add(_, src0, src1) => src0.wrapping_add(*src1),
             Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
+            Inst::ShiftLeftLogicalImm(_, src, imm) => src.wrapping_shl(imm.0),
             Inst::LoadWord(_, src) => mem.readw(src.compute_addr()),
             Inst::BranchIfEqual(src0, src1, _) => (src0 == src1).into(),
             Inst::BranchIfNotEqual(src0, src1, _) => (src0 != src1).into(),

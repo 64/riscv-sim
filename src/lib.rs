@@ -1,3 +1,4 @@
+pub mod branch;
 pub mod cpu;
 pub mod emulated;
 pub mod execution_unit;
@@ -11,4 +12,3 @@ pub mod queue;
 pub mod regs;
 pub mod rob;
 pub mod util;
-pub mod branch;

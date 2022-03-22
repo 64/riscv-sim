@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
     branch::{BranchPredictor, BranchTargetBuffer},
@@ -19,13 +19,14 @@ mod stages {
 
     #[derive(Debug, Clone, Default)]
     pub struct Fetch {
-        pub inst: Option<Inst>,
+        pub inst: Option<(u32, Tagged<Inst>)>,
         pub next_pc: u32,
     }
 
     #[derive(Debug, Clone, Default)]
     pub struct DecodeIssue {
         pub inst: Option<Inst>,
+        pub next_fetch: Option<u32>,
         pub should_stall: bool,
     }
 
@@ -35,6 +36,7 @@ mod stages {
     #[derive(Debug, Clone, Default)]
     pub struct Writeback {
         pub inst: Option<Tagged<ExecutedInst>>,
+        pub next_fetch: Option<u32>,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -97,11 +99,9 @@ impl Cpu for OutOfOrder {
         let mut pipe = Pipeline::default();
 
         loop {
-            let fetch = self.stage_fetch(&pipe);
-            let decode_issue = self.stage_decode_issue(&pipe);
-            let execute = self.stage_execute(&pipe);
-            let writeback = self.stage_writeback(&pipe);
             let commit = self.stage_commit(&pipe);
+            let writeback = self.stage_writeback(&pipe);
+            let execute = self.stage_execute(&pipe);
 
             if commit.should_halt {
                 return ExecResult {
@@ -115,22 +115,49 @@ impl Cpu for OutOfOrder {
                 insts_retired += 1;
             }
 
-            if decode_issue.should_stall {
+            if let Some(next_pc) = writeback.next_fetch {
                 pipe = Pipeline {
-                    fetch: pipe.fetch,
-                    decode_issue,
+                    fetch: stages::Fetch {
+                        inst: None,
+                        next_pc,
+                    },
+                    decode_issue: stages::DecodeIssue::default(),
                     execute,
                     writeback,
                     commit,
                 };
             } else {
-                pipe = Pipeline {
-                    fetch,
-                    decode_issue,
-                    execute,
-                    writeback,
-                    commit,
-                };
+                let decode_issue = self.stage_decode_issue(&pipe);
+                let fetch = self.stage_fetch(&pipe);
+
+                if decode_issue.should_stall {
+                    pipe = Pipeline {
+                        fetch: pipe.fetch,
+                        decode_issue,
+                        execute,
+                        writeback,
+                        commit,
+                    };
+                } else if let Some(next_pc) = decode_issue.next_fetch {
+                    pipe = Pipeline {
+                        fetch: stages::Fetch {
+                            inst: None,
+                            next_pc,
+                        },
+                        decode_issue,
+                        execute,
+                        writeback,
+                        commit,
+                    };
+                } else {
+                    pipe = Pipeline {
+                        fetch,
+                        decode_issue,
+                        execute,
+                        writeback,
+                        commit,
+                    };
+                }
             }
 
             self.cycles += 1;
@@ -149,17 +176,15 @@ impl Cpu for OutOfOrder {
 impl OutOfOrder {
     #[allow(dead_code)]
     fn dump(&self, pipe: &Pipeline) {
+        // dbg!(&self.lsq);
         dbg!(&self.reg_file);
-        dbg!(&self.rob);
         dbg!(&self.reservation_station);
+        dbg!(&self.rob);
         dbg!(&self.execution_units);
         dbg!(pipe);
     }
 
-    fn rename_and_reserve(&mut self, inst: Inst) -> bool {
-        // Assumes we only issue 1 inst per cycle.
-        let tag = Tag::from(self.cycles);
-
+    fn rename_and_reserve(&mut self, tag: Tag, inst: Inst) -> bool {
         if self.rob.is_full() || self.reservation_station.len() == self.rs_max {
             return true;
         }
@@ -168,7 +193,7 @@ impl OutOfOrder {
             return true;
         }
 
-        if let Some(renamed_inst) = self.reg_file.perform_rename(inst.clone()) {
+        if let Some(renamed_inst) = self.reg_file.perform_rename(tag, inst.clone(), &self.rob) {
             assert_eq!(self.rob.try_push(tag, inst), None);
             assert_eq!(
                 self.reservation_station.insert(tag, renamed_inst.clone()),
@@ -187,26 +212,78 @@ impl OutOfOrder {
 
     fn stage_fetch(&mut self, pipe: &Pipeline) -> stages::Fetch {
         let fetch_or_halt = |pc| self.prog.fetch(pc).cloned().unwrap_or(Inst::Halt);
+        let tag = Tag::from(self.cycles); // Assumes we only fetch 1 instruction per cycle.
 
         // Branch prediction
         let pc = pipe.fetch.next_pc;
         let next_pc = match self.btb.get(pc) {
-            Some(target) if self.branch_predictor.predict_taken(pc, target) => target,
+            Some(taken_pc) => {
+                let predict_taken = self.branch_predictor.predict_taken(pc, taken_pc);
+                let not_taken_pc = pc + 1;
+
+                self.reg_file
+                    .begin_predict(tag, predict_taken, taken_pc, not_taken_pc);
+
+                if predict_taken {
+                    taken_pc
+                } else {
+                    not_taken_pc
+                }
+            }
             _ => pc + 1,
         };
 
         stages::Fetch {
-            inst: Some(fetch_or_halt(pc)),
+            inst: Some((
+                pc,
+                Tagged {
+                    inst: fetch_or_halt(pc),
+                    tag,
+                },
+            )),
             next_pc,
         }
     }
 
     fn stage_decode_issue(&mut self, pipe: &Pipeline) -> stages::DecodeIssue {
         match &pipe.fetch.inst {
-            Some(inst) => stages::DecodeIssue {
-                inst: Some(inst.clone()),
-                should_stall: self.issue(inst.clone()),
-            },
+            Some((pc, Tagged { inst, tag })) => {
+                let mut next_fetch = None;
+
+                match inst {
+                    Inst::BranchIfEqual(_, _, tgt)
+                    | Inst::BranchIfNotEqual(_, _, tgt)
+                    | Inst::BranchIfGreaterEqual(_, _, tgt) => {
+                        let taken_pc = self.prog.labels[tgt];
+                        let not_taken_pc = pc + 1;
+
+                        if !self.reg_file.is_speculating(*tag) {
+                            let predict_taken = self.branch_predictor.predict_taken(*pc, taken_pc);
+                            self.reg_file.begin_predict(
+                                *tag,
+                                predict_taken,
+                                taken_pc,
+                                not_taken_pc,
+                            );
+
+                            // We didn't predict taken during fetch, so we must re-fetch from the
+                            // speculated address.
+                            if predict_taken {
+                                next_fetch = Some(taken_pc);
+                            }
+                        }
+
+                        self.btb.add_entry(*pc, taken_pc);
+                    }
+                    _ => (),
+                }
+
+                stages::DecodeIssue {
+                    inst: Some(inst.clone()),
+                    next_fetch,
+                    should_stall: self.issue(*tag, inst.clone()),
+                }
+            }
             None => Default::default(),
         }
     }
@@ -224,40 +301,53 @@ impl OutOfOrder {
     fn stage_writeback(&mut self, _pipe: &Pipeline) -> stages::Writeback {
         for eu in &mut self.execution_units {
             if let Some((Tagged { tag, inst }, result)) = eu.take_complete() {
-                // Only allow writeback of 1 instruction per cycle, for now.
+                let mut next_fetch = None;
+
                 match &inst {
-                    Inst::AddImm(dst, _, _) | Inst::LoadWord(dst, _) => {
+                    Inst::Add(dst, _, _)
+                    | Inst::AddImm(dst, _, _)
+                    | Inst::ShiftLeftLogicalImm(dst, _, _)
+                    | Inst::LoadWord(dst, _) => {
                         if dst.arch != ArchReg::Zero {
                             self.reg_file.set_phys_active(dst.phys, result.val);
                         }
                     }
-                    Inst::BranchIfEqual(_, _, tgt)
-                    | Inst::BranchIfNotEqual(_, _, tgt)
-                    | Inst::BranchIfGreaterEqual(_, _, tgt) => {
-                        todo!(); // Check if our prediction was correct.
+                    Inst::BranchIfEqual(_, _, _)
+                    | Inst::BranchIfNotEqual(_, _, _)
+                    | Inst::BranchIfGreaterEqual(_, _, _) => {
+                        let taken = result.val == 1;
+                        let predicted_taken = self.reg_file.was_predicted_taken(tag);
+
+                        if let Some(next_pc) =
+                            self.reg_file.end_predict(tag, taken, predicted_taken)
+                        {
+                            // Flush
+                            self.kill_tags_after(tag);
+                            next_fetch = Some(next_pc);
+                        }
                     }
                     Inst::StoreWord(_, _) | Inst::Halt => (),
                     _ => unimplemented!("{:?}", inst),
                 }
 
+                self.rob.mark_complete(tag);
+
                 return stages::Writeback {
                     inst: Some(Tagged { tag, inst }),
+                    next_fetch,
                 };
             }
         }
 
-        stages::Writeback { inst: None }
+        stages::Writeback {
+            inst: None,
+            next_fetch: None,
+        }
     }
 
     // Commit instructions from the ROB to architectural state.
-    fn stage_commit(&mut self, pipe: &Pipeline) -> stages::Commit {
+    fn stage_commit(&mut self, _pipe: &Pipeline) -> stages::Commit {
         let tagged = self.rob.try_pop();
-
-        // Mark the written back instructions as completed now, to simulate 1 cycle of delay
-        // between writeback and commit.
-        if let Some(tagged) = &pipe.writeback.inst {
-            self.rob.mark_complete(tagged.tag);
-        }
 
         let Tagged { tag, inst } = match tagged {
             Some(Tagged {
@@ -274,12 +364,22 @@ impl OutOfOrder {
         };
 
         match inst {
-            Inst::AddImm(dst, _, _) | Inst::LoadWord(dst, _) => {
+            Inst::Add(dst, _, _)
+            | Inst::AddImm(dst, _, _)
+            | Inst::ShiftLeftLogicalImm(dst, _, _)
+            | Inst::LoadWord(dst, _) => {
                 if dst != ArchReg::Zero {
                     self.reg_file.release_phys();
                 }
+
+                if inst.is_mem_access() {
+                    self.lsq.release_load(tag);
+                }
             }
             Inst::StoreWord(_, _) => self.lsq.submit_store(tag, &self.reg_file, &mut self.mem),
+            Inst::BranchIfEqual(_, _, _)
+            | Inst::BranchIfNotEqual(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _) => (),
             _ => unimplemented!("{:?}", inst),
         }
 
@@ -290,13 +390,9 @@ impl OutOfOrder {
         }
     }
 
-    fn issue(&mut self, inst: Inst) -> bool {
+    fn issue(&mut self, tag: Tag, inst: Inst) -> bool {
         // Try to issue more instructions to reservation stations.
         let mut remove_tags = vec![];
-
-        if self.rename_and_reserve(inst) {
-            return true;
-        }
 
         // TODO: improve this logic.
         for (tag, ready_inst) in self
@@ -322,16 +418,23 @@ impl OutOfOrder {
             self.reservation_station.remove(&tag);
         }
 
+        // We must do this AFTER issueing, in case the ROB is full.
+        if self.rename_and_reserve(tag, inst) {
+            return true;
+        }
+
         false
     }
 
-    /// Get a reference to the out of order's branch predictor.
-    pub fn branch_predictor(&self) -> &BranchPredictor {
-        &self.branch_predictor
-    }
+    fn kill_tags_after(&mut self, tag: Tag) {
+        self.reservation_station.retain(|&t, _| t <= tag);
 
-    /// Get a reference to the out of order's btb.
-    pub fn btb(&self) -> &BranchTargetBuffer {
-        &self.btb
+        for eu in &mut self.execution_units {
+            eu.kill_tags_after(tag);
+        }
+
+        self.lsq.kill_tags_after(tag);
+        self.rob.kill_tags_after(tag);
+        self.reg_file.kill_tags_after(tag);
     }
 }

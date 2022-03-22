@@ -14,6 +14,7 @@ pub struct Emulated {
     prog: Program,
     pc: u32,
     cycles: u64,
+    insts_retired: u64,
 }
 
 impl Cpu for Emulated {
@@ -24,6 +25,7 @@ impl Cpu for Emulated {
             regs: RegSet::new(regs),
             pc: 0,
             cycles: 0,
+            insts_retired: 0,
             mem,
             prog,
         }
@@ -40,7 +42,7 @@ impl Cpu for Emulated {
         ExecResult {
             mem: self.mem,
             cycles_taken: self.cycles,
-            insts_retired: self.cycles,
+            insts_retired: self.insts_retired,
         }
     }
 }
@@ -130,7 +132,8 @@ impl Emulated {
             self.pc += 1;
         }
 
-        self.cycles += 1;
+        self.insts_retired += 1;
+        self.cycles += next_inst.latency();
 
         CpuState::Running
     }

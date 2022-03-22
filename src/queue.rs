@@ -41,4 +41,8 @@ impl<T: Clone> Queue<T> {
     pub fn iter_mut(&mut self) -> vec_deque::IterMut<'_, T> {
         self.data.iter_mut()
     }
+
+    pub fn retain<F>(&mut self, f: F) where F: FnMut(&T) -> bool {
+        self.data.retain(f)
+    }
 }

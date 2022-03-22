@@ -3,6 +3,7 @@ use crate::{
     regs::{PrfEntry, RegFile},
     util::Addr,
 };
+use lru_mem::HeapSize;
 use std::{fmt::Debug, str::FromStr};
 use strum::{self, EnumIter, EnumString};
 
@@ -234,8 +235,8 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
             | Inst::BranchIfEqual(_, _, _)
             | Inst::BranchIfGreaterEqual(_, _, _) => 1,
             Inst::Add(_, _, _) | Inst::AddImm(_, _, _) | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
-            Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _) => 2,
-            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => 1, // Doesn't actually matter.
+            Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _) => 4,
+            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => 4,
             Inst::Halt => 0,
         }
     }

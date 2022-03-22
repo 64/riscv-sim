@@ -68,4 +68,13 @@ impl LoadStoreQueue {
             _ => unreachable!(),
         }
     }
+
+    pub fn release_load(&mut self, tag: Tag) {
+        self.loads.retain(|l| l.tag != tag);
+    }
+
+    pub fn kill_tags_after(&mut self, tag: Tag) {
+        self.loads.retain(|ent| ent.tag <= tag);
+        self.stores.retain(|ent| ent.tag <= tag);
+    }
 }
