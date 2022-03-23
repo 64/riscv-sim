@@ -10,6 +10,7 @@ mod pipelined;
 mod program;
 mod queue;
 mod regs;
+mod reservation_station;
 mod rob;
 mod util;
 

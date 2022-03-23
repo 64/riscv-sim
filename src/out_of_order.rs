@@ -9,6 +9,7 @@ use crate::{
     mem::Memory,
     program::Program,
     regs::RegFile,
+    reservation_station::ReservationStation,
     rob::ReorderBuffer,
 };
 
@@ -65,13 +66,12 @@ pub struct OutOfOrder {
     mem: Memory,
     prog: Program,
     execution_units: Vec<ExecutionUnit>,
-    reservation_station: BTreeMap<Tag, RenamedInst>,
+    reservation_station: ReservationStation,
     lsq: LoadStoreQueue,
     rob: ReorderBuffer,
     branch_predictor: BranchPredictor,
     reg_file: RegFile,
     cycles: u64,
-    rs_max: usize,
 }
 
 impl Cpu for OutOfOrder {
@@ -88,10 +88,9 @@ impl Cpu for OutOfOrder {
             ],
             rob: ReorderBuffer::new(20),
             lsq: LoadStoreQueue::new(10, 10),
-            reservation_station: Default::default(),
+            reservation_station: ReservationStation::new(10),
             reg_file: RegFile::new(regs, 32),
             branch_predictor: BranchPredictor::new(),
-            rs_max: 10,
             cycles: 0,
         }
     }
@@ -219,7 +218,7 @@ impl OutOfOrder {
             None => return stages::Rename::default(),
         };
 
-        if self.rob.is_full() || self.reservation_station.len() == self.rs_max {
+        if self.rob.is_full() || self.reservation_station.is_full() {
             return stages::Rename {
                 inst: None,
                 should_stall: true,
@@ -235,10 +234,7 @@ impl OutOfOrder {
 
         if let Some(renamed_inst) = self.reg_file.perform_rename(inst.clone()) {
             assert_eq!(self.rob.try_push(tag, inst), None);
-            assert_eq!(
-                self.reservation_station.insert(tag, renamed_inst.clone()),
-                None
-            );
+            self.reservation_station.insert(tag, renamed_inst.clone());
 
             if renamed_inst.is_mem_access() {
                 self.lsq.insert_access(renamed_inst.clone(), tag);
@@ -257,15 +253,9 @@ impl OutOfOrder {
     }
 
     fn stage_issue(&mut self, _pipe: &Pipeline) -> stages::Issue {
-        // Try to issue more instructions to reservation stations.
         let mut remove_tags = vec![];
 
-        // TODO: improve this logic.
-        for (tag, ready_inst) in self
-            .reservation_station
-            .iter()
-            .filter_map(|(&tag, inst)| inst.get_ready(&self.reg_file).map(|inst| (tag, inst)))
-        {
+        for (&tag, ready_inst) in self.reservation_station.get_ready(&self.reg_file) {
             if ready_inst.is_load() && !self.lsq.can_execute_load(tag) {
                 continue;
             }
@@ -275,13 +265,13 @@ impl OutOfOrder {
                 .iter_mut()
                 .find(|eu| eu.can_execute(&ready_inst))
             {
+                eu.begin_execute(ready_inst.clone(), tag);
                 remove_tags.push(tag);
-                eu.begin_execute(ready_inst, tag);
             }
         }
 
         for tag in remove_tags {
-            self.reservation_station.remove(&tag);
+            self.reservation_station.pop_ready(tag);
         }
 
         stages::Issue
@@ -395,12 +385,11 @@ impl OutOfOrder {
     }
 
     fn kill_tags_after(&mut self, tag: Tag) {
-        self.reservation_station.retain(|&t, _| t <= tag);
-
         for eu in &mut self.execution_units {
             eu.kill_tags_after(tag);
         }
 
+        self.reservation_station.kill_tags_after(tag);
         self.lsq.kill_tags_after(tag);
         self.rob.kill_tags_after(tag);
         self.reg_file.kill_tags_after(tag);

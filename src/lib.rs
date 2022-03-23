@@ -10,5 +10,6 @@ pub mod pipelined;
 pub mod program;
 pub mod queue;
 pub mod regs;
+pub mod reservation_station;
 pub mod rob;
 pub mod util;
