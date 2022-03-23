@@ -3,7 +3,7 @@ use crate::{
     regs::{PrfEntry, RegFile},
     util::Addr,
 };
-use lru_mem::HeapSize;
+
 use std::{
     fmt::{self, Debug},
     str::FromStr,

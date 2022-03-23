@@ -2,11 +2,10 @@ use strum::IntoEnumIterator;
 
 use crate::{
     inst::{ArchReg, BothReg, Inst, MemRef, PhysReg, RenamedInst, Tag, ValueOrReg},
-    rob::ReorderBuffer,
     util::Addr,
 };
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     fmt,
 };
 

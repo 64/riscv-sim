@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::{
     branch::BranchPredictor,
@@ -157,6 +157,7 @@ impl Cpu for OutOfOrder {
 
             self.cycles += 1;
 
+            #[cfg(debug_assertions)]
             if std::env::var("SINGLE_STEP").is_ok() {
                 self.dump(&pipe);
                 std::io::stdin().read_line(&mut String::new()).unwrap();
@@ -255,8 +256,8 @@ impl OutOfOrder {
     fn stage_issue(&mut self, _pipe: &Pipeline) -> stages::Issue {
         let mut remove_tags = vec![];
 
-        for (&tag, ready_inst) in self.reservation_station.get_ready(&self.reg_file) {
-            if ready_inst.is_load() && !self.lsq.can_execute_load(tag) {
+        for (tag, ready_inst) in self.reservation_station.get_ready(&self.reg_file) {
+            if ready_inst.is_load() && !self.lsq.can_execute_load(*tag) {
                 continue;
             }
 
@@ -265,8 +266,8 @@ impl OutOfOrder {
                 .iter_mut()
                 .find(|eu| eu.can_execute(&ready_inst))
             {
-                eu.begin_execute(ready_inst.clone(), tag);
-                remove_tags.push(tag);
+                eu.begin_execute(ready_inst.clone(), *tag);
+                remove_tags.push(*tag);
             }
         }
 

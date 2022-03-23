@@ -4,6 +4,7 @@ use aca::{
     inst::ArchReg,
     mem::Memory,
     out_of_order::OutOfOrder,
+    parse_and_exec,
     pipelined::Pipelined,
     program::Program,
     util::Addr,
@@ -13,18 +14,6 @@ use std::collections::HashMap;
 #[generic_tests::define]
 mod t {
     use super::*;
-
-    fn parse_and_exec<C: Cpu>(
-        name: &'static str,
-        regs: HashMap<ArchReg, u32>,
-        mem: Memory,
-    ) -> ExecResult {
-        let contents = std::fs::read_to_string(format!("asm/{}.asm", name)).unwrap();
-        let prog = contents
-            .parse::<Program>()
-            .expect("failed to parse assembly");
-        C::new(prog, regs, mem).exec_all()
-    }
 
     #[test]
     fn test_loop<C: Cpu>() {
