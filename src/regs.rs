@@ -186,42 +186,36 @@ impl RegFile {
     }
 
     pub fn perform_rename(&mut self, inst: Inst) -> Option<RenamedInst> {
-        let mut should_stall = false;
-
+        // Have to do this in two separate steps to prevent borrowing issues.
         let renamed_inst = inst.clone().map_src_regs(|src_reg| match src_reg {
             ArchReg::Zero => ValueOrReg::Value(0),
             src_reg => ValueOrReg::Reg(self.get_alias(src_reg)),
         });
-        let renamed_inst = renamed_inst.map_dst_regs(|dst_reg| {
-            if dst_reg == ArchReg::Zero {
-                BothReg {
-                    arch: ArchReg::Zero,
-                    phys: PhysReg::none(),
+        let renamed_inst = renamed_inst.try_map(
+            |src_reg| Some(src_reg),
+            |dst_reg| {
+                if dst_reg == ArchReg::Zero {
+                    Some(BothReg {
+                        arch: ArchReg::Zero,
+                        phys: PhysReg::none(),
+                    })
+                } else if let Some(slot) = self.allocate_phys() {
+                    // Prepare the old PhysReg for reclaim.
+                    let old_phys = self.get_alias(dst_reg);
+                    self.prrt.push_back(old_phys);
+                    self.set_alias(dst_reg, slot);
+                    Some(BothReg {
+                        arch: dst_reg,
+                        phys: slot,
+                    })
+                } else {
+                    None
                 }
-            } else if let Some(slot) = self.allocate_phys() {
-                // Prepare the old PhysReg for reclaim.
-                let old_phys = self.get_alias(dst_reg);
-                self.prrt.push_back(old_phys);
-                self.set_alias(dst_reg, slot);
-                BothReg {
-                    arch: dst_reg,
-                    phys: slot,
-                }
-            } else {
-                should_stall = true; // PRF full.
+            },
+            |jump| Some(jump),
+        );
 
-                BothReg {
-                    arch: dst_reg,
-                    phys: PhysReg::default(),
-                }
-            }
-        });
-
-        if should_stall {
-            None
-        } else {
-            Some(renamed_inst)
-        }
+        renamed_inst
     }
 }
 

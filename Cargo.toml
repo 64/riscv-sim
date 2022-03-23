@@ -6,8 +6,8 @@ edition = "2021"
 [features]
 
 [profile.release]
-debug = false
-# debug = true
+# debug = false
+debug = true
 
 [dependencies]
 lru-mem = "0.2.0"

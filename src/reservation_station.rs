@@ -28,6 +28,7 @@ impl ReservationStation {
         self.waiting.push((tag, inst));
     }
 
+    // TODO: This interface (get_ready, pop_ready) is a bit janky
     pub fn get_ready(&mut self, reg_file: &RegFile) -> impl Iterator<Item = &(Tag, ReadyInst)> {
         self.waiting.retain(
             |(tag, renamed_inst)| match renamed_inst.get_ready(reg_file) {
