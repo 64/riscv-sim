@@ -108,44 +108,44 @@ impl Emulated {
                 let val = if b == 0 { a } else { a % b };
                 self.regs.set(dst, val);
             }
-            Inst::Jump(ref tgt) => {
-                self.pc = self.prog.labels[tgt];
+            Inst::Jump(tgt) => {
+                self.pc = tgt.into();
                 advance_pc = false;
             }
-            Inst::JumpAndLink(dst, ref tgt) => {
+            Inst::JumpAndLink(dst, tgt) => {
                 self.regs.set(dst, self.pc + 1);
-                self.pc = self.prog.labels[tgt];
+                self.pc = tgt.into();
                 advance_pc = false;
             }
-            Inst::BranchIfEqual(src0, src1, ref tgt) => {
+            Inst::BranchIfEqual(src0, src1, tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a == b {
-                    self.pc = self.prog.labels[tgt];
+                    self.pc = tgt.into();
                     advance_pc = false;
                 }
             }
-            Inst::BranchIfNotEqual(src0, src1, ref tgt) => {
+            Inst::BranchIfNotEqual(src0, src1, tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a != b {
-                    self.pc = self.prog.labels[tgt];
+                    self.pc = tgt.into();
                     advance_pc = false;
                 }
             }
-            Inst::BranchIfGreaterEqual(src0, src1, ref tgt) => {
+            Inst::BranchIfGreaterEqual(src0, src1, tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a >= b {
-                    self.pc = self.prog.labels[tgt];
+                    self.pc = tgt.into();
                     advance_pc = false;
                 }
             }
-            Inst::BranchIfLess(src0, src1, ref tgt) => {
+            Inst::BranchIfLess(src0, src1, tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a < b {
-                    self.pc = self.prog.labels[tgt];
+                    self.pc = tgt.into();
                     advance_pc = false;
                 }
             }

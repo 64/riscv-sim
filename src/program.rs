@@ -1,17 +1,17 @@
-use crate::inst::{Inst, Label};
+use crate::inst::{Inst, Label, LabeledInst, Pc};
 use std::{collections::HashMap, str::FromStr};
 
 #[derive(Debug, Clone)]
 pub struct Program {
     pub insts: Vec<Inst>,
-    pub labels: HashMap<Label, u32>, // indices into the insts array
+    pub labels: HashMap<Label, Pc>,
 }
 
 impl FromStr for Program {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut insts = Vec::new();
+        let mut insts = Vec::default();
         let mut labels = HashMap::new();
 
         for (i, line) in s.lines().enumerate() {
@@ -31,7 +31,7 @@ impl FromStr for Program {
                     Err(e) => return Err(format!("error parsing label on line {i}: {e}")),
                 };
             } else {
-                match Inst::from_str(line) {
+                match LabeledInst::from_str(line) {
                     Ok(inst) => insts.push(inst),
                     Err(e) => {
                         return Err(format!(
@@ -41,6 +41,12 @@ impl FromStr for Program {
                 }
             }
         }
+
+        // Do another pass to fixup the labels.
+        let insts = insts
+            .into_iter()
+            .map(|inst| inst.map_jumps(|tgt| labels[&tgt]))
+            .collect();
 
         Ok(Program { insts, labels })
     }

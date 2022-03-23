@@ -190,7 +190,7 @@ impl OutOfOrder {
             | Inst::BranchIfNotEqual(_, _, tgt)
             | Inst::BranchIfLess(_, _, tgt)
             | Inst::BranchIfGreaterEqual(_, _, tgt) => {
-                let taken_pc = self.prog.labels[tgt];
+                let taken_pc = u32::from(*tgt);
                 let not_taken_pc = pc + 1;
                 let predict_taken = self.branch_predictor.predict_taken(pc, taken_pc);
 
@@ -203,7 +203,7 @@ impl OutOfOrder {
                     not_taken_pc
                 }
             }
-            Inst::Jump(ref tgt) => self.prog.labels[tgt],
+            Inst::Jump(tgt) => u32::from(*tgt),
             _ => pc + 1,
         };
 

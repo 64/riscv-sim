@@ -335,13 +335,13 @@ impl Pipelined {
             | Inst::AddImm(dst, _, _) => {
                 self.regs.set(dst, val);
             }
-            Inst::Jump(ref dst)
-            | Inst::BranchIfNotEqual(_, _, ref dst)
-            | Inst::BranchIfEqual(_, _, ref dst)
-            | Inst::BranchIfLess(_, _, ref dst)
-            | Inst::BranchIfGreaterEqual(_, _, ref dst) => {
+            Inst::Jump(tgt)
+            | Inst::BranchIfNotEqual(_, _, tgt)
+            | Inst::BranchIfEqual(_, _, tgt)
+            | Inst::BranchIfLess(_, _, tgt)
+            | Inst::BranchIfGreaterEqual(_, _, tgt) => {
                 jump_target = if val != 0 {
-                    Some(self.prog.labels[dst])
+                    Some(tgt.into())
                 } else {
                     Some(pipe.fetch.next_pc)
                 };

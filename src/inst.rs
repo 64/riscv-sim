@@ -16,6 +16,9 @@ pub struct Imm(pub u32);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Label(pub String);
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct Pc(pub u32);
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct MemRef<RegType: Debug + Clone = ArchReg> {
     pub base: RegType,
@@ -49,7 +52,11 @@ pub enum ArchReg {
 // https://mark.theis.site/riscv/
 // https://web.eecs.utk.edu/~smarz1/courses/ece356/notes/assembly/
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> {
+pub enum Inst<
+    SrcReg: Debug + Clone = ArchReg,
+    DstReg: Debug + Clone = ArchReg,
+    JumpType: Debug + Clone = Pc,
+> {
     LoadByte(DstReg, MemRef<SrcReg>),
     LoadHalfWord(DstReg, MemRef<SrcReg>),
     LoadWord(DstReg, MemRef<SrcReg>),
@@ -61,12 +68,12 @@ pub enum Inst<SrcReg: Debug + Clone = ArchReg, DstReg: Debug + Clone = ArchReg> 
     AndImm(DstReg, SrcReg, Imm),
     ShiftLeftLogicalImm(DstReg, SrcReg, Imm),
     Rem(DstReg, SrcReg, SrcReg),
-    Jump(Label),
-    JumpAndLink(DstReg, Label),
-    BranchIfEqual(SrcReg, SrcReg, Label),
-    BranchIfNotEqual(SrcReg, SrcReg, Label),
-    BranchIfGreaterEqual(SrcReg, SrcReg, Label),
-    BranchIfLess(SrcReg, SrcReg, Label),
+    Jump(JumpType),
+    JumpAndLink(DstReg, JumpType),
+    BranchIfEqual(SrcReg, SrcReg, JumpType),
+    BranchIfNotEqual(SrcReg, SrcReg, JumpType),
+    BranchIfGreaterEqual(SrcReg, SrcReg, JumpType),
+    BranchIfLess(SrcReg, SrcReg, JumpType),
     Halt, // Used internally when execution finishes.
 }
 
@@ -94,6 +101,9 @@ pub struct BothReg {
     pub phys: PhysReg,
 }
 
+// Inst with labels not yet resolved to PC values.
+pub type LabeledInst = Inst<ArchReg, ArchReg, Label>;
+
 // Inst with its source operands ready for computation.
 pub type ReadyInst = Inst<u32, BothReg>;
 
@@ -103,7 +113,7 @@ pub type RenamedInst = Inst<ValueOrReg, BothReg>;
 // Inst after execution. The source registers are no longer used.
 pub type ExecutedInst = Inst<(), BothReg>;
 
-impl FromStr for Inst {
+impl FromStr for LabeledInst {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -123,29 +133,30 @@ impl FromStr for Inst {
             ArchReg::from_str(nth_arg(n)?).map_err(|e| e.to_string())
         };
 
+        #[rustfmt::skip]
         let inst = match op.to_lowercase().as_str() {
-            "lb" => Inst::LoadByte(reg_arg(0)?, mem_arg(1)?),
-            "lh" => Inst::LoadHalfWord(reg_arg(0)?, mem_arg(1)?),
-            "lw" => Inst::LoadWord(reg_arg(0)?, mem_arg(1)?),
-            "sb" => Inst::StoreByte(reg_arg(0)?, mem_arg(1)?),
-            "sh" => Inst::StoreHalfWord(reg_arg(0)?, mem_arg(1)?),
-            "sw" => Inst::StoreWord(reg_arg(0)?, mem_arg(1)?),
-            "add" => Inst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
-            "addi" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
-            "andi" => Inst::AndImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
-            "slli" => Inst::ShiftLeftLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
-            "rem" => Inst::Rem(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
-            "li" => Inst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
-            "mv" => Inst::AddImm(reg_arg(0)?, reg_arg(1)?, Imm(0)),
-            "j" => Inst::Jump(label_arg(0)?),
-            "jal" => Inst::JumpAndLink(reg_arg(0)?, label_arg(1)?),
-            "beq" => Inst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
-            "bne" => Inst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
-            "bge" => Inst::BranchIfGreaterEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
-            "ble" => Inst::BranchIfGreaterEqual(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
-            "blt" => Inst::BranchIfLess(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
-            "bgt" => Inst::BranchIfLess(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
-            "nop" => Inst::nop(),
+            "lb" => LabeledInst::LoadByte(reg_arg(0)?, mem_arg(1)?),
+            "lh" => LabeledInst::LoadHalfWord(reg_arg(0)?, mem_arg(1)?),
+            "lw" => LabeledInst::LoadWord(reg_arg(0)?, mem_arg(1)?),
+            "sb" => LabeledInst::StoreByte(reg_arg(0)?, mem_arg(1)?),
+            "sh" => LabeledInst::StoreHalfWord(reg_arg(0)?, mem_arg(1)?),
+            "sw" => LabeledInst::StoreWord(reg_arg(0)?, mem_arg(1)?),
+            "add" => LabeledInst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
+            "addi" => LabeledInst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "andi" => LabeledInst::AndImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "slli" => LabeledInst::ShiftLeftLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "rem" => LabeledInst::Rem(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
+            "li" => LabeledInst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
+            "mv" => LabeledInst::AddImm(reg_arg(0)?, reg_arg(1)?, Imm(0)),
+            "j" => LabeledInst::Jump(label_arg(0)?),
+            "jal" => LabeledInst::JumpAndLink(reg_arg(0)?, label_arg(1)?),
+            "beq" => LabeledInst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "bne" => LabeledInst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "bge" => LabeledInst::BranchIfGreaterEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "ble" => LabeledInst::BranchIfGreaterEqual(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
+            "blt" => LabeledInst::BranchIfLess(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "bgt" => LabeledInst::BranchIfLess(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
+            "nop" => LabeledInst::nop(),
             "ret" => todo!(),
             _ => return Err(format!("unknown instruction: '{}'", op)),
         };
@@ -154,11 +165,13 @@ impl FromStr for Inst {
     }
 }
 
-impl Inst {
+impl<J: Debug + Clone> Inst<ArchReg, ArchReg, J> {
     pub fn nop() -> Self {
         Inst::AddImm(ArchReg::Zero, ArchReg::Zero, Imm(0))
     }
+}
 
+impl Inst {
     pub fn writes_reg(&self, reg: ArchReg) -> bool {
         if reg == ArchReg::Zero {
             return false;
@@ -187,7 +200,9 @@ impl Inst {
     }
 }
 
-impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
+impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
+    Inst<SrcReg, DstReg, JumpType>
+{
     pub fn is_branch(&self) -> bool {
         match self {
             Inst::Jump(_)
@@ -261,16 +276,19 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
     }
 
     #[rustfmt::skip]
-    pub fn try_map_regs<OtherSrcReg, OtherDstReg, SrcFn, DstFn>(
+    pub fn try_map<OtherSrcReg, OtherDstReg, OtherJumpType, SrcFn, DstFn, JumpFn>(
         self,
         mut src_fn: SrcFn,
         mut dst_fn: DstFn,
-    ) -> Option<Inst<OtherSrcReg, OtherDstReg>>
+        mut jump_fn: JumpFn,
+    ) -> Option<Inst<OtherSrcReg, OtherDstReg, OtherJumpType>>
     where
         OtherSrcReg: Debug + Clone,
         OtherDstReg: Debug + Clone,
+        OtherJumpType:  Debug + Clone,
         SrcFn: FnMut(SrcReg) -> Option<OtherSrcReg>,
         DstFn: FnMut(DstReg) -> Option<OtherDstReg>,
+        JumpFn: FnMut(JumpType) -> Option<OtherJumpType>,
     {
         Some(match self {
             Inst::Add(dst, src0, src1) => Inst::Add(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
@@ -284,12 +302,12 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
             Inst::StoreByte(src, dst) => Inst::StoreByte(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
             Inst::StoreHalfWord(src, dst) => Inst::StoreHalfWord(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
             Inst::StoreWord(src, dst) => Inst::StoreWord(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
-            Inst::JumpAndLink(dst, label) => Inst::JumpAndLink(dst_fn(dst)?, label),
-            Inst::BranchIfNotEqual(src0, src1, label) => Inst::BranchIfNotEqual(src_fn(src0)?, src_fn(src1)?, label),
-            Inst::BranchIfEqual(src0, src1, label) => Inst::BranchIfEqual(src_fn(src0)?, src_fn(src1)?, label),
-            Inst::BranchIfGreaterEqual(src0, src1, label)=> Inst::BranchIfGreaterEqual(src_fn(src0)?, src_fn(src1)?, label),
-            Inst::BranchIfLess(src0, src1, label)=> Inst::BranchIfLess(src_fn(src0)?, src_fn(src1)?, label),
-            Inst::Jump(label) => Inst::Jump(label),
+            Inst::JumpAndLink(dst, label) => Inst::JumpAndLink(dst_fn(dst)?, jump_fn(label)?),
+            Inst::BranchIfNotEqual(src0, src1, label) => Inst::BranchIfNotEqual(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
+            Inst::BranchIfEqual(src0, src1, label) => Inst::BranchIfEqual(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
+            Inst::BranchIfGreaterEqual(src0, src1, label)=> Inst::BranchIfGreaterEqual(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
+            Inst::BranchIfLess(src0, src1, label)=> Inst::BranchIfLess(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
+            Inst::Jump(label) => Inst::Jump(jump_fn(label)?),
             Inst::Halt => Inst::Halt,
         })
     }
@@ -298,21 +316,25 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
         self,
         mut src_fn: SrcFn,
         mut dst_fn: DstFn,
-    ) -> Inst<OtherSrcReg, OtherDstReg>
+    ) -> Inst<OtherSrcReg, OtherDstReg, JumpType>
     where
         OtherSrcReg: Debug + Clone,
         OtherDstReg: Debug + Clone,
         SrcFn: FnMut(SrcReg) -> OtherSrcReg,
         DstFn: FnMut(DstReg) -> OtherDstReg,
     {
-        self.try_map_regs(
+        self.try_map(
             |src_reg| Some(src_fn(src_reg)),
             |dst_reg| Some(dst_fn(dst_reg)),
+            |jmp| Some(jmp),
         )
         .unwrap()
     }
 
-    pub fn map_src_regs<OtherSrcReg, SrcFn>(self, mut src_fn: SrcFn) -> Inst<OtherSrcReg, DstReg>
+    pub fn map_src_regs<OtherSrcReg, SrcFn>(
+        self,
+        mut src_fn: SrcFn,
+    ) -> Inst<OtherSrcReg, DstReg, JumpType>
     where
         OtherSrcReg: Debug + Clone,
         SrcFn: FnMut(SrcReg) -> OtherSrcReg,
@@ -320,7 +342,10 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
         self.map_regs(|src_reg| src_fn(src_reg), |dst_reg| dst_reg)
     }
 
-    pub fn map_dst_regs<OtherDstReg, DstFn>(self, mut dst_fn: DstFn) -> Inst<SrcReg, OtherDstReg>
+    pub fn map_dst_regs<OtherDstReg, DstFn>(
+        self,
+        mut dst_fn: DstFn,
+    ) -> Inst<SrcReg, OtherDstReg, JumpType>
     where
         OtherDstReg: Debug + Clone,
         DstFn: FnMut(DstReg) -> OtherDstReg,
@@ -328,14 +353,30 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone> Inst<SrcReg, DstReg> {
         self.map_regs(|src_reg| src_reg, |dst_reg| dst_fn(dst_reg))
     }
 
-    pub fn executed(self) -> Inst<(), DstReg> {
+    pub fn map_jumps<OtherJumpType, JumpFn>(
+        self,
+        mut jump_fn: JumpFn,
+    ) -> Inst<SrcReg, DstReg, OtherJumpType>
+    where
+        OtherJumpType: Debug + Clone,
+        JumpFn: FnMut(JumpType) -> OtherJumpType,
+    {
+        self.try_map(
+            |src_reg| Some(src_reg),
+            |dst_reg| Some(dst_reg),
+            |jump| Some(jump_fn(jump)),
+        )
+        .unwrap()
+    }
+
+    pub fn executed(self) -> Inst<(), DstReg, JumpType> {
         self.map_regs(|_src_reg| (), |dst_reg| dst_reg)
     }
 }
 
 impl RenamedInst {
     pub fn get_ready(&self, rf: &RegFile) -> Option<ReadyInst> {
-        self.clone().try_map_regs(
+        self.clone().try_map(
             |r| match r {
                 ValueOrReg::Value(x) => Some(x),
                 ValueOrReg::Reg(phys_reg) => match rf.get_phys(phys_reg) {
@@ -344,6 +385,7 @@ impl RenamedInst {
                 },
             },
             |dst_reg| Some(dst_reg),
+            |jmp| Some(jmp),
         )
     }
 }
@@ -476,6 +518,26 @@ impl From<usize> for PhysReg {
 impl From<PhysReg> for usize {
     fn from(r: PhysReg) -> Self {
         r.0.try_into().expect("could not convert PhysReg to usize")
+    }
+}
+
+impl From<Pc> for u32 {
+    fn from(pc: Pc) -> Self {
+        pc.0
+    }
+}
+
+impl From<u32> for Pc {
+    fn from(pc: u32) -> Self {
+        Pc(pc)
+    }
+}
+
+impl TryFrom<usize> for Pc {
+    type Error = <u32 as TryFrom<usize>>::Error;
+
+    fn try_from(pc: usize) -> Result<Self, Self::Error> {
+        Ok(Pc(pc.try_into()?))
     }
 }
 

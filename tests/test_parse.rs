@@ -1,4 +1,7 @@
-use aca::{inst::Label, program::Program};
+use aca::{
+    inst::{Label, Pc},
+    program::Program,
+};
 use std::collections::HashMap;
 
 #[test]
@@ -23,8 +26,8 @@ fn check_labels() {
         .expect("failed to parse asm/label.asm");
 
     let mut test = HashMap::new();
-    test.insert(Label("foo".to_owned()), 1);
-    test.insert(Label(".bar".to_owned()), 3);
-    test.insert(Label("baz5".to_owned()), 4);
+    test.insert(Label("foo".to_owned()), Pc::from(1));
+    test.insert(Label(".bar".to_owned()), Pc::from(3));
+    test.insert(Label("baz5".to_owned()), Pc::from(4));
     assert_eq!(prog.labels, test);
 }
