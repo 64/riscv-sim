@@ -1,14 +1,18 @@
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
-use aca::{cpu::Cpu, inst::ArchReg, mem::Memory, out_of_order::OutOfOrder, parse_and_exec};
+use aca::{cpu::Cpu, inst::ArchReg, mem::MainMemory, out_of_order::OutOfOrder, parse_and_exec};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 type CpuType = OutOfOrder;
 
 fn is_prime<C: Cpu>(x: u32) -> bool {
-    parse_and_exec::<C>("prime", HashMap::from([(ArchReg::A0, x)]), Memory::new())
-        .regs
-        .get(ArchReg::A0)
+    parse_and_exec::<C>(
+        "prime",
+        HashMap::from([(ArchReg::A0, x)]),
+        MainMemory::new(),
+    )
+    .regs
+    .get(ArchReg::A0)
         == 1
 }
 

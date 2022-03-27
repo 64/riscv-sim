@@ -6,7 +6,7 @@ use crate::{
     execution_unit::{EuType, ExecutionUnit},
     inst::{ArchReg, Inst, RenamedInst, Tag, Tagged},
     lsq::LoadStoreQueue,
-    mem::Memory,
+    mem::{MainMemory, MemoryHierarchy},
     program::Program,
     regs::RegFile,
     reservation_station::ReservationStation,
@@ -63,7 +63,7 @@ pub struct Pipeline {
 
 #[derive(Debug, Clone)]
 pub struct OutOfOrder {
-    mem: Memory,
+    mem: MemoryHierarchy,
     prog: Program,
     execution_units: Vec<ExecutionUnit>,
     reservation_station: ReservationStation,
@@ -75,9 +75,9 @@ pub struct OutOfOrder {
 }
 
 impl Cpu for OutOfOrder {
-    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: Memory) -> Self {
+    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: MainMemory) -> Self {
         Self {
-            mem,
+            mem: MemoryHierarchy::new(mem),
             prog,
             execution_units: vec![
                 ExecutionUnit::new(EuType::ALU),
@@ -100,6 +100,7 @@ impl Cpu for OutOfOrder {
         let mut pipe = Pipeline::default();
 
         loop {
+            self.mem.tick();
             let commit = self.stage_commit(&pipe);
             let writeback = self.stage_writeback(&pipe);
             let execute = self.stage_execute(&pipe);
@@ -108,7 +109,7 @@ impl Cpu for OutOfOrder {
             if commit.should_halt {
                 return ExecResult {
                     regs: self.reg_file.get_reg_set(),
-                    mem: self.mem,
+                    mem: self.mem.main,
                     cycles_taken: self.cycles,
                     insts_retired,
                 };

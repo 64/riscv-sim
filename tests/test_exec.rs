@@ -1,13 +1,6 @@
 use aca::{
-    cpu::{Cpu, ExecResult},
-    emulated::Emulated,
-    inst::ArchReg,
-    mem::Memory,
-    out_of_order::OutOfOrder,
-    parse_and_exec,
-    pipelined::Pipelined,
-    program::Program,
-    util::Addr,
+    cpu::Cpu, emulated::Emulated, inst::ArchReg, mem::MainMemory, out_of_order::OutOfOrder,
+    parse_and_exec, pipelined::Pipelined, util::Addr,
 };
 use std::collections::HashMap;
 
@@ -24,7 +17,7 @@ mod t {
             (ArchReg::A3, 10),
         ]);
 
-        let mut initial_mem = Memory::new();
+        let mut initial_mem = MainMemory::new();
         for i in 0..10 {
             initial_mem.writew(Addr(40 + i * 4), i);
             initial_mem.writew(Addr(80 + i * 4), 10 - i);
@@ -39,7 +32,7 @@ mod t {
 
     #[test]
     fn test_label<C: Cpu>() {
-        let res = parse_and_exec::<C>("label", HashMap::new(), Memory::new());
+        let res = parse_and_exec::<C>("label", HashMap::new(), MainMemory::new());
         for i in 0..10 {
             assert_eq!(res.mem.readw(Addr(i * 4)), 0);
         }
@@ -47,7 +40,7 @@ mod t {
 
     #[test]
     fn test_branch<C: Cpu>() {
-        let res = parse_and_exec::<C>("branch", HashMap::new(), Memory::new());
+        let res = parse_and_exec::<C>("branch", HashMap::new(), MainMemory::new());
         assert_eq!(res.mem.readw(Addr(0)), 4);
         assert_eq!(res.mem.readw(Addr(4)), 3);
         assert_eq!(res.mem.readw(Addr(8)), 2);
@@ -55,7 +48,7 @@ mod t {
 
     #[test]
     fn test_hazard_raw<C: Cpu>() {
-        let res = parse_and_exec::<C>("hazard_raw", HashMap::new(), Memory::new());
+        let res = parse_and_exec::<C>("hazard_raw", HashMap::new(), MainMemory::new());
         assert_eq!(res.mem.readw(Addr(0)), 3);
         assert_eq!(res.mem.readw(Addr(4)), 1);
         assert_eq!(res.mem.readw(Addr(8)), 1);
@@ -63,14 +56,14 @@ mod t {
 
     #[test]
     fn test_hazard_war<C: Cpu>() {
-        let res = parse_and_exec::<C>("hazard_war", HashMap::new(), Memory::new());
+        let res = parse_and_exec::<C>("hazard_war", HashMap::new(), MainMemory::new());
         assert_eq!(res.mem.readw(Addr(0)), 1);
         assert_eq!(res.mem.readw(Addr(4)), 2);
     }
 
     #[test]
     fn test_hazard_waw<C: Cpu>() {
-        let res = parse_and_exec::<C>("hazard_waw", HashMap::new(), Memory::new());
+        let res = parse_and_exec::<C>("hazard_waw", HashMap::new(), MainMemory::new());
         assert_eq!(res.mem.readw(Addr(0)), 2);
         assert_eq!(res.mem.readw(Addr(4)), 2);
     }
@@ -78,9 +71,13 @@ mod t {
     #[test]
     fn test_prime<C: Cpu>() {
         let run = |x| {
-            parse_and_exec::<C>("prime", HashMap::from([(ArchReg::A0, x)]), Memory::new())
-                .regs
-                .get(ArchReg::A0)
+            parse_and_exec::<C>(
+                "prime",
+                HashMap::from([(ArchReg::A0, x)]),
+                MainMemory::new(),
+            )
+            .regs
+            .get(ArchReg::A0)
         };
 
         assert_eq!(run(2), 1);

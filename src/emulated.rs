@@ -1,7 +1,7 @@
 use crate::{
     cpu::{Cpu, CpuState, ExecResult},
     inst::{ArchReg, Inst},
-    mem::Memory,
+    mem::MainMemory,
     program::Program,
     regs::RegSet,
 };
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct Emulated {
     regs: RegSet,
-    mem: Memory,
+    mem: MainMemory,
     prog: Program,
     pc: u32,
     cycles: u64,
@@ -18,7 +18,7 @@ pub struct Emulated {
 }
 
 impl Cpu for Emulated {
-    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: Memory) -> Self {
+    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: MainMemory) -> Self {
         assert!(regs.get(&ArchReg::Zero).is_none());
 
         Self {

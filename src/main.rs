@@ -14,7 +14,7 @@ mod reservation_station;
 mod rob;
 mod util;
 
-use crate::{cpu::Cpu, inst::ArchReg, mem::Memory};
+use crate::{cpu::Cpu, inst::ArchReg, mem::MainMemory};
 use std::{collections::HashMap, time::Instant};
 
 fn main() {
@@ -37,9 +37,9 @@ fn main() {
         .unwrap_or(0);
     let initial_regs = HashMap::from([(ArchReg::A0, a0)]);
 
-    // let res = emulated::Emulated::new(prog, initial_regs, Memory::new()).exec_all();
-    // let res = pipelined::Pipelined::new(prog, initial_regs, Memory::new()).exec_all();
-    let res = out_of_order::OutOfOrder::new(prog, initial_regs, Memory::new()).exec_all();
+    // let res = emulated::Emulated::new(prog, initial_regs, MainMemory::new()).exec_all();
+    // let res = pipelined::Pipelined::new(prog, initial_regs, MainMemory::new()).exec_all();
+    let res = out_of_order::OutOfOrder::new(prog, initial_regs, MainMemory::new()).exec_all();
     dbg!(&res);
 
     println!("    EXECUTION COMPLETED");

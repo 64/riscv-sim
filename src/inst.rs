@@ -268,9 +268,13 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
             | Inst::AddImm(_, _, _)
             | Inst::AndImm(_, _, _)
             | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
+            Inst::StoreByte(_, _)
+            | Inst::StoreHalfWord(_, _)
+            | Inst::StoreWord(_, _)
+            | Inst::LoadByte(_, _)
+            | Inst::LoadHalfWord(_, _)
+            | Inst::LoadWord(_, _) => 3,
             Inst::Rem(_, _, _) => 3,
-            Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _) => 4,
-            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => 4,
             Inst::Halt => 0,
         }
     }
@@ -342,16 +346,16 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
         self.map_regs(|src_reg| src_fn(src_reg), |dst_reg| dst_reg)
     }
 
-    pub fn map_dst_regs<OtherDstReg, DstFn>(
-        self,
-        mut dst_fn: DstFn,
-    ) -> Inst<SrcReg, OtherDstReg, JumpType>
-    where
-        OtherDstReg: Debug + Clone,
-        DstFn: FnMut(DstReg) -> OtherDstReg,
-    {
-        self.map_regs(|src_reg| src_reg, |dst_reg| dst_fn(dst_reg))
-    }
+    // pub fn map_dst_regs<OtherDstReg, DstFn>(
+    //     self,
+    //     mut dst_fn: DstFn,
+    // ) -> Inst<SrcReg, OtherDstReg, JumpType>
+    // where
+    //     OtherDstReg: Debug + Clone,
+    //     DstFn: FnMut(DstReg) -> OtherDstReg,
+    // {
+    //     self.map_regs(|src_reg| src_reg, |dst_reg| dst_fn(dst_reg))
+    // }
 
     pub fn map_jumps<OtherJumpType, JumpFn>(
         self,
@@ -387,6 +391,15 @@ impl RenamedInst {
             |dst_reg| Some(dst_reg),
             |jmp| Some(jmp),
         )
+    }
+}
+
+impl ReadyInst {
+    pub fn access_addr(&self) -> Addr {
+        match self {
+            Inst::LoadWord(_, dst) | Inst::StoreWord(_, dst) => dst.compute_addr(),
+            _ => unimplemented!(),
+        }
     }
 }
 

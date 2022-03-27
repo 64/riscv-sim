@@ -1,6 +1,6 @@
 use crate::{
     inst::{Inst, RenamedInst, Tag, Tagged},
-    mem::Memory,
+    mem::MemoryHierarchy,
     queue::Queue,
     regs::RegFile,
 };
@@ -53,7 +53,7 @@ impl LoadStoreQueue {
             .unwrap_or(true)
     }
 
-    pub fn submit_store(&mut self, tag: Tag, rf: &RegFile, mem: &mut Memory) {
+    pub fn submit_store(&mut self, tag: Tag, rf: &RegFile, mem: &mut MemoryHierarchy) {
         let store = self.stores.try_pop().unwrap();
         debug_assert_eq!(store.tag, tag);
 
@@ -63,7 +63,7 @@ impl LoadStoreQueue {
             .expect("store committed when not ready")
         {
             Inst::StoreWord(val, dst) => {
-                mem.writew(dst.compute_addr(), val);
+                mem.main.writew(dst.compute_addr(), val);
             }
             _ => unreachable!(),
         }

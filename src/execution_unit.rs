@@ -1,6 +1,6 @@
 use crate::{
     inst::{ExecutedInst, Inst, ReadyInst, Tag, Tagged},
-    mem::Memory,
+    mem::MemoryHierarchy,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -26,6 +26,8 @@ pub struct ExecutionUnit {
     completed_inst: Option<(Tagged<ExecutedInst>, EuResult)>,
 }
 
+// TODO: get rid of begin_inst
+
 impl ExecutionUnit {
     pub fn new(eu_type: EuType) -> Self {
         Self {
@@ -45,9 +47,19 @@ impl ExecutionUnit {
         self.begin_inst = Some(Tagged { tag, inst });
     }
 
-    pub fn advance(&mut self, mem: &mut Memory) {
+    pub fn advance(&mut self, mem: &mut MemoryHierarchy) {
         if let Some((Tagged { tag, inst }, cycles)) = self.executing_inst.take() {
-            if cycles + 1 >= inst.latency() && self.completed_inst.is_none() {
+            let is_done = if inst.is_mem_access() {
+                mem.is_access_complete(tag, inst.access_addr())
+            } else {
+                cycles + 1 >= inst.latency()
+            };
+
+            if is_done && self.completed_inst.is_none() {
+                if inst.is_mem_access() {
+                    mem.finish_access(tag, inst.access_addr());
+                }
+
                 let res = self.compute_result(&inst, mem);
                 self.completed_inst = Some((
                     Tagged {
@@ -87,7 +99,7 @@ impl ExecutionUnit {
         }
     }
 
-    fn compute_result(&self, inst: &ReadyInst, mem: &mut Memory) -> EuResult {
+    fn compute_result(&self, inst: &ReadyInst, mem: &mut MemoryHierarchy) -> EuResult {
         let val = match inst {
             Inst::Add(_, src0, src1) => src0.wrapping_add(*src1),
             Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
@@ -100,11 +112,11 @@ impl ExecutionUnit {
                 }
             }
             Inst::ShiftLeftLogicalImm(_, src, imm) => src.wrapping_shl(imm.0),
-            Inst::LoadWord(_, src) => mem.readw(src.compute_addr()),
             Inst::BranchIfEqual(src0, src1, _) => (src0 == src1).into(),
             Inst::BranchIfNotEqual(src0, src1, _) => (src0 != src1).into(),
             Inst::BranchIfGreaterEqual(src0, src1, _) => (src0 >= src1).into(),
             Inst::Jump(_) | Inst::Halt => 0,
+            Inst::LoadWord(_, src) => mem.main.readw(src.compute_addr()),
             x if x.is_store() => 0, // Stores are handled by LSQ upon retire.
             _ => unimplemented!("{:?}", inst),
         };

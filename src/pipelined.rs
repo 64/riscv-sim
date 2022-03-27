@@ -1,7 +1,7 @@
 use crate::{
     cpu::{Cpu, ExecResult},
     inst::{ArchReg, Inst},
-    mem::Memory,
+    mem::MainMemory,
     program::Program,
     regs::RegSet,
     util::Addr,
@@ -58,13 +58,13 @@ struct Pipeline {
 #[derive(Debug, Clone)]
 pub struct Pipelined {
     regs: RegSet,
-    mem: Memory,
+    mem: MainMemory,
     prog: Program,
     is_stalled: bool,
 }
 
 impl Cpu for Pipelined {
-    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: Memory) -> Self {
+    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: MainMemory) -> Self {
         assert!(regs.get(&ArchReg::Zero).is_none());
 
         Self {
@@ -129,11 +129,11 @@ impl Cpu for Pipelined {
                     writeback,
                 };
             }
-            dbg!(&pipe);
 
             cycles += 1;
 
             if std::env::var("SINGLE_STEP").is_ok() {
+                dbg!(&pipe);
                 std::io::stdin().read_line(&mut String::new()).unwrap();
             }
 
