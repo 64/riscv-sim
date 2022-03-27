@@ -14,12 +14,12 @@ pub struct RegSet {
     regs: HashMap<ArchReg, u32>,
 }
 
-type RAT = HashMap<ArchReg, PhysReg>;
+type AliasTable = HashMap<ArchReg, PhysReg>;
 
 // See https://docs.boom-core.org/en/latest/sections/rename-stage.html#the-free-list
 #[derive(Debug, Clone, Default)]
 pub struct BranchInfo {
-    rat_cp: RAT,
+    rat_cp: AliasTable,
     alloc_list: Vec<PhysReg>,
     taken: bool,
     taken_pc: u32,
@@ -31,7 +31,7 @@ pub struct PhysFile(Vec<PrfEntry>);
 
 #[derive(Debug, Clone)]
 pub struct RegFile {
-    rat: RAT,
+    rat: AliasTable,
     phys_rf: PhysFile,
     prrt: VecDeque<PhysReg>,
     branch_info: HashMap<Tag, BranchInfo>,
@@ -187,12 +187,13 @@ impl RegFile {
 
     pub fn perform_rename(&mut self, inst: Inst) -> Option<RenamedInst> {
         // Have to do this in two separate steps to prevent borrowing issues.
-        let renamed_inst = inst.clone().map_src_regs(|src_reg| match src_reg {
+        let renamed_inst = inst.map_src_regs(|src_reg| match src_reg {
             ArchReg::Zero => ValueOrReg::Value(0),
             src_reg => ValueOrReg::Reg(self.get_alias(src_reg)),
         });
-        let renamed_inst = renamed_inst.try_map(
-            |src_reg| Some(src_reg),
+
+        renamed_inst.try_map(
+            Some,
             |dst_reg| {
                 if dst_reg == ArchReg::Zero {
                     Some(BothReg {
@@ -212,10 +213,8 @@ impl RegFile {
                     None
                 }
             },
-            |jump| Some(jump),
-        );
-
-        renamed_inst
+            Some,
+        )
     }
 }
 

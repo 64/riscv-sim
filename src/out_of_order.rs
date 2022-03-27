@@ -80,8 +80,8 @@ impl Cpu for OutOfOrder {
             mem: MemoryHierarchy::new(mem),
             prog,
             execution_units: vec![
-                ExecutionUnit::new(EuType::ALU),
-                ExecutionUnit::new(EuType::ALU),
+                ExecutionUnit::new(EuType::Alu),
+                ExecutionUnit::new(EuType::Alu),
                 ExecutionUnit::new(EuType::Branch),
                 ExecutionUnit::new(EuType::LoadStore),
                 ExecutionUnit::new(EuType::Special),
@@ -265,7 +265,7 @@ impl OutOfOrder {
             if let Some(eu) = self
                 .execution_units
                 .iter_mut()
-                .find(|eu| eu.can_execute(&ready_inst))
+                .find(|eu| eu.can_execute(ready_inst))
             {
                 eu.begin_execute(ready_inst.clone(), *tag);
                 remove_tags.push(*tag);

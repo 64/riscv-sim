@@ -10,7 +10,7 @@ pub struct EuResult {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum EuType {
-    ALU,
+    Alu,
     LoadStore,
     Branch,
     Special, // Halt and such.
@@ -50,7 +50,7 @@ impl ExecutionUnit {
     pub fn advance(&mut self, mem: &mut MemoryHierarchy) {
         if let Some((Tagged { tag, inst }, cycles)) = self.executing_inst.take() {
             let is_done = if inst.is_mem_access() {
-                mem.is_access_complete(tag, inst.access_addr())
+                mem.access_complete(tag, inst.access_addr())
             } else {
                 cycles + 1 >= inst.latency()
             };

@@ -5,7 +5,7 @@
 //     cache: LruCache<u32, u32>, // PC -> Addr
 // }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BranchPredictor;
 
 // impl BranchTargetBuffer {

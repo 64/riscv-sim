@@ -204,15 +204,15 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
     Inst<SrcReg, DstReg, JumpType>
 {
     pub fn is_branch(&self) -> bool {
-        match self {
+        matches!(
+            self,
             Inst::Jump(_)
-            | Inst::JumpAndLink(_, _)
-            | Inst::BranchIfNotEqual(_, _, _)
-            | Inst::BranchIfEqual(_, _, _)
-            | Inst::BranchIfLess(_, _, _)
-            | Inst::BranchIfGreaterEqual(_, _, _) => true,
-            _ => false,
-        }
+                | Inst::JumpAndLink(_, _)
+                | Inst::BranchIfNotEqual(_, _, _)
+                | Inst::BranchIfEqual(_, _, _)
+                | Inst::BranchIfLess(_, _, _)
+                | Inst::BranchIfGreaterEqual(_, _, _)
+        )
     }
 
     pub fn is_mem_access(&self) -> bool {
@@ -220,17 +220,17 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
     }
 
     pub fn is_load(&self) -> bool {
-        match self {
-            Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _) => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _)
+        )
     }
 
     pub fn is_store(&self) -> bool {
-        match self {
-            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _) => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Inst::StoreByte(_, _) | Inst::StoreHalfWord(_, _) | Inst::StoreWord(_, _)
+        )
     }
 
     pub fn eu_type(&self) -> EuType {
@@ -245,7 +245,7 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
             | Inst::AddImm(_, _, _)
             | Inst::AndImm(_, _, _)
             | Inst::ShiftLeftLogicalImm(_, _, _)
-            | Inst::Rem(_, _, _) => EuType::ALU,
+            | Inst::Rem(_, _, _) => EuType::Alu,
             Inst::LoadByte(_, _)
             | Inst::LoadHalfWord(_, _)
             | Inst::LoadWord(_, _)
@@ -337,13 +337,13 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
 
     pub fn map_src_regs<OtherSrcReg, SrcFn>(
         self,
-        mut src_fn: SrcFn,
+        src_fn: SrcFn,
     ) -> Inst<OtherSrcReg, DstReg, JumpType>
     where
         OtherSrcReg: Debug + Clone,
         SrcFn: FnMut(SrcReg) -> OtherSrcReg,
     {
-        self.map_regs(|src_reg| src_fn(src_reg), |dst_reg| dst_reg)
+        self.map_regs(src_fn, |dst_reg| dst_reg)
     }
 
     // pub fn map_dst_regs<OtherDstReg, DstFn>(
@@ -388,8 +388,8 @@ impl RenamedInst {
                     _ => None,
                 },
             },
-            |dst_reg| Some(dst_reg),
-            |jmp| Some(jmp),
+            Some,
+            Some,
         )
     }
 }
@@ -407,10 +407,10 @@ impl FromStr for Imm {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let val = if s.starts_with("0x") {
-            i64::from_str_radix(&s[2..], 16)
-        } else if s.starts_with("-0x") {
-            i64::from_str_radix(&s[3..], 16).map(|v| -v)
+        let val = if let Some(s) = s.strip_prefix("0x") {
+            i64::from_str_radix(s, 16)
+        } else if let Some(s) = s.strip_prefix("-0x") {
+            i64::from_str_radix(s, 16).map(|v| -v)
         } else {
             i64::from_str(s)
         };
@@ -418,13 +418,13 @@ impl FromStr for Imm {
         let val = val.map_err(|_| format!("invalid immediate: '{s}'"))?;
 
         if let Ok(u) = u32::try_from(val) {
-            return Ok(Self(u));
+            Ok(Self(u))
         } else if let Ok(s) = i32::try_from(val) {
             assert!(s < 0);
             let abs: u32 = s.abs().try_into().unwrap();
-            return Ok(Self(u32::MAX - abs + 1));
+            Ok(Self(u32::MAX - abs + 1))
         } else {
-            return Err(format!("invalid immediate: '{s}'"));
+            Err(format!("invalid immediate: '{s}'"))
         }
     }
 }

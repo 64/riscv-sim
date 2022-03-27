@@ -1,11 +1,6 @@
 use crate::{inst::Tag, util::Addr};
 use associative_cache::*;
 
-#[derive(Debug, Clone)]
-pub struct MainMemory {
-    mem: Vec<u8>,
-}
-
 const L1_CAPACITY_BYTES: usize = 16_000;
 const L2_CAPACITY_BYTES: usize = 32_000;
 const L3_CAPACITY_BYTES: usize = 128_000;
@@ -14,6 +9,11 @@ const L1_LATENCY: u64 = 5;
 const L2_LATENCY: u64 = 20;
 const L3_LATENCY: u64 = 40;
 const DRAM_LATENCY: u64 = 400;
+
+#[derive(Debug, Clone, Default)]
+pub struct MainMemory {
+    mem: Vec<u8>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Pending {
@@ -42,7 +42,7 @@ impl MemoryHierarchy {
         }
     }
 
-    pub fn is_access_complete(&mut self, tag: Tag, addr: Addr) -> bool {
+    pub fn access_complete(&mut self, tag: Tag, addr: Addr) -> bool {
         match self.pending_fetches.iter().find(|p| p.tag == tag) {
             Some(p) => p.current >= p.end,
             None => {
