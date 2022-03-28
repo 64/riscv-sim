@@ -2,6 +2,7 @@ use strum::IntoEnumIterator;
 
 use crate::{
     inst::{ArchReg, BothReg, Inst, MemRef, PhysReg, RenamedInst, Tag, ValueOrReg},
+    mem,
     util::Addr,
 };
 use std::{
@@ -9,7 +10,7 @@ use std::{
     fmt,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Default)]
 pub struct RegSet {
     regs: HashMap<ArchReg, u32>,
 }
@@ -46,7 +47,7 @@ pub enum PrfEntry {
 }
 
 impl RegFile {
-    pub fn new(initial_regs: HashMap<ArchReg, u32>, prf_capacity: usize) -> Self {
+    pub fn new(initial_regs: RegSet, prf_capacity: usize) -> Self {
         assert!(
             ArchReg::iter().count() <= prf_capacity,
             "prf not large enough"
@@ -65,9 +66,8 @@ impl RegFile {
                 continue;
             }
 
-            let val = initial_regs.get(&reg).unwrap_or(&0);
             let slot = rf.allocate_phys_internal().unwrap();
-            rf.set_phys_active(slot, *val);
+            rf.set_phys_active(slot, initial_regs.get(reg));
             rf.set_alias(reg, slot);
         }
 
@@ -83,7 +83,7 @@ impl RegFile {
                 _ => unreachable!(),
             })
             .collect();
-        RegSet::new(map)
+        RegSet::from(map)
     }
 
     pub fn was_predicted_taken(&self, branch: Tag) -> bool {
@@ -234,9 +234,26 @@ impl fmt::Debug for PhysFile {
     }
 }
 
-impl RegSet {
-    pub fn new(regs: HashMap<ArchReg, u32>) -> Self {
+impl From<HashMap<ArchReg, u32>> for RegSet {
+    fn from(mut regs: HashMap<ArchReg, u32>) -> Self {
+        if regs.get(&ArchReg::SP).is_none() {
+            regs.insert(ArchReg::SP, mem::STACK_TOP.try_into().unwrap());
+        }
+        assert_eq!(regs.get(&ArchReg::Zero), None);
         Self { regs }
+    }
+}
+
+impl<const SIZE: usize> From<[(ArchReg, u32); SIZE]> for RegSet {
+    fn from(regs: [(ArchReg, u32); SIZE]) -> Self {
+        RegSet::from(HashMap::from(regs))
+    }
+}
+
+impl RegSet {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn get(&self, reg: ArchReg) -> u32 {
@@ -255,5 +272,13 @@ impl RegSet {
 
     pub fn ref_to_addr(&self, mr: MemRef) -> Addr {
         Addr(self.get(mr.base).wrapping_add(mr.offset.0))
+    }
+}
+
+impl fmt::Debug for RegSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map()
+            .entries(self.regs.iter().filter(|&(_, v)| *v != 0))
+            .finish()
     }
 }

@@ -1,11 +1,11 @@
 ; compile with -O3 -march=rv32im -mabi=ilp32
+;
 ; int is_prime(int x) {
 ;     for (int i = 2; i < x; i++) {
 ;         if (x % i == 0) {
 ;             return 0;
 ;         }
 ;     }
-    
 ;     return 1;
 ; }
 

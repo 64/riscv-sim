@@ -14,8 +14,8 @@ mod reservation_station;
 mod rob;
 mod util;
 
-use crate::{cpu::Cpu, inst::ArchReg, mem::MainMemory};
-use std::{collections::HashMap, time::Instant};
+use crate::{cpu::Cpu, inst::ArchReg, mem::MainMemory, regs::RegSet};
+use std::time::Instant;
 
 fn main() {
     let start = Instant::now();
@@ -35,7 +35,11 @@ fn main() {
         .nth(2)
         .and_then(|x| x.parse::<u32>().ok())
         .unwrap_or(0);
-    let initial_regs = HashMap::from([(ArchReg::A0, a0)]);
+    let a1 = std::env::args()
+        .nth(3)
+        .and_then(|x| x.parse::<u32>().ok())
+        .unwrap_or(0);
+    let initial_regs = RegSet::from([(ArchReg::A0, a0), (ArchReg::A1, a1)]);
 
     // let res = emulated::Emulated::new(prog, initial_regs, MainMemory::new()).exec_all();
     // let res = pipelined::Pipelined::new(prog, initial_regs, MainMemory::new()).exec_all();

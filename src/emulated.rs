@@ -1,11 +1,10 @@
 use crate::{
     cpu::{Cpu, CpuState, ExecResult},
-    inst::{ArchReg, Inst},
+    inst::Inst,
     mem::MainMemory,
     program::Program,
     regs::RegSet,
 };
-use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Emulated {
@@ -18,14 +17,12 @@ pub struct Emulated {
 }
 
 impl Cpu for Emulated {
-    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: MainMemory) -> Self {
-        assert!(regs.get(&ArchReg::Zero).is_none());
-
+    fn new(prog: Program, regs: RegSet, mem: MainMemory) -> Self {
         Self {
-            regs: RegSet::new(regs),
             pc: 0,
             cycles: 0,
             insts_retired: 0,
+            regs,
             mem,
             prog,
         }
@@ -54,6 +51,11 @@ impl Emulated {
             Some(i) => i,
             None => return CpuState::Stopped,
         };
+
+        if std::env::var("SINGLE_STEP").is_ok() {
+            println!("{:?}", next_inst);
+            std::io::stdin().read_line(&mut String::new()).unwrap();
+        }
 
         let mut advance_pc = true;
 
@@ -87,6 +89,11 @@ impl Emulated {
                 let b = self.regs.get(src1);
                 self.regs.set(dst, a.wrapping_add(b));
             }
+            Inst::Sub(dst, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                self.regs.set(dst, a.wrapping_sub(b));
+            }
             Inst::AddImm(dst, src, imm) => {
                 let a = self.regs.get(src);
                 let b = imm.0;
@@ -101,6 +108,11 @@ impl Emulated {
                 let a = self.regs.get(src);
                 let b = imm.0;
                 self.regs.set(dst, a.wrapping_shl(b));
+            }
+            Inst::Mul(dst, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                self.regs.set(dst, a.wrapping_mul(b));
             }
             Inst::Rem(dst, src0, src1) => {
                 let a = self.regs.get(src0);
@@ -148,6 +160,11 @@ impl Emulated {
                     self.pc = tgt.into();
                     advance_pc = false;
                 }
+            }
+            Inst::SetLessThanImmU(dst, src, imm) => {
+                let r = self.regs.get(src);
+                let val = if r < imm.0 { 1 } else { 0 };
+                self.regs.set(dst, val);
             }
             Inst::Halt => unreachable!(),
         }

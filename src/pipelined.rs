@@ -1,12 +1,12 @@
 use crate::{
     cpu::{Cpu, ExecResult},
-    inst::{ArchReg, Inst},
+    inst::Inst,
     mem::MainMemory,
     program::Program,
     regs::RegSet,
     util::Addr,
 };
-use std::{collections::HashMap, default::Default};
+use std::default::Default;
 
 mod stages {
     use super::*;
@@ -64,11 +64,9 @@ pub struct Pipelined {
 }
 
 impl Cpu for Pipelined {
-    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: MainMemory) -> Self {
-        assert!(regs.get(&ArchReg::Zero).is_none());
-
+    fn new(prog: Program, regs: RegSet, mem: MainMemory) -> Self {
         Self {
-            regs: RegSet::new(regs),
+            regs,
             is_stalled: false,
             mem,
             prog,
@@ -207,6 +205,11 @@ impl Pipelined {
                 let b = self.regs.get(src1);
                 out.alu_or_mem_val = a.wrapping_add(b);
             }
+            Inst::Sub(_, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                out.alu_or_mem_val = a.wrapping_sub(b);
+            }
             Inst::AddImm(_, src, imm) => {
                 let a = self.regs.get(src);
                 let b = imm.0;
@@ -221,6 +224,11 @@ impl Pipelined {
                 let a = self.regs.get(src);
                 let b = imm.0;
                 out.alu_or_mem_val = a.wrapping_shl(b);
+            }
+            Inst::Mul(_, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                out.alu_or_mem_val = a.wrapping_mul(b);
             }
             Inst::Rem(_, src0, src1) => {
                 let a = self.regs.get(src0);
@@ -246,6 +254,11 @@ impl Pipelined {
             Inst::BranchIfLess(src0, src1, _) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
+                out.alu_or_mem_val = (a < b).into();
+            }
+            Inst::SetLessThanImmU(_, src, imm) => {
+                let a = self.regs.get(src);
+                let b = imm.0;
                 out.alu_or_mem_val = (a < b).into();
             }
             Inst::LoadByte(_, addr) | Inst::LoadHalfWord(_, addr) | Inst::LoadWord(_, addr) => {
@@ -326,10 +339,13 @@ impl Pipelined {
 
         match inst {
             Inst::ShiftLeftLogicalImm(dst, _, _)
+            | Inst::SetLessThanImmU(dst, _, _)
             | Inst::LoadByte(dst, _)
             | Inst::LoadHalfWord(dst, _)
             | Inst::LoadWord(dst, _)
             | Inst::Add(dst, _, _)
+            | Inst::Sub(dst, _, _)
+            | Inst::Mul(dst, _, _)
             | Inst::Rem(dst, _, _)
             | Inst::AndImm(dst, _, _)
             | Inst::AddImm(dst, _, _) => {
@@ -380,8 +396,11 @@ mod hazard {
             | Inst::BranchIfGreaterEqual(src0, src1, _)
             | Inst::BranchIfLess(src0, src1, _)
             | Inst::Add(_, src0, src1)
+            | Inst::Sub(_, src0, src1)
+            | Inst::Mul(_, src0, src1)
             | Inst::Rem(_, src0, src1) => b.writes_reg(src0) || b.writes_reg(src1),
             Inst::ShiftLeftLogicalImm(_, src, _)
+            | Inst::SetLessThanImmU(_, src, _)
             | Inst::AddImm(_, src, _)
             | Inst::AndImm(_, src, _) => b.writes_reg(src),
             Inst::Jump(_) | Inst::JumpAndLink(_, _) | Inst::Halt => false,

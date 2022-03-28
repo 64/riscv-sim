@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 use cpu::{Cpu, ExecResult};
-use inst::ArchReg;
 use mem::MainMemory;
 use program::Program;
+use regs::RegSet;
 
 pub mod branch;
 pub mod cpu;
@@ -21,11 +19,7 @@ pub mod reservation_station;
 pub mod rob;
 pub mod util;
 
-pub fn parse_and_exec<C: Cpu>(
-    name: &'static str,
-    regs: HashMap<ArchReg, u32>,
-    mem: MainMemory,
-) -> ExecResult {
+pub fn parse_and_exec<C: Cpu>(name: &'static str, regs: RegSet, mem: MainMemory) -> ExecResult {
     let contents = std::fs::read_to_string(format!("asm/{}.asm", name)).unwrap();
     let prog = contents
         .parse::<Program>()

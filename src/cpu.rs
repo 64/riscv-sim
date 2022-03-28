@@ -1,5 +1,6 @@
-use crate::{inst::ArchReg, mem::MainMemory, program::Program, regs::RegSet};
-use std::collections::HashMap;
+use std::fmt;
+
+use crate::{mem::MainMemory, program::Program, regs::RegSet};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CpuState {
@@ -7,7 +8,7 @@ pub enum CpuState {
     Stopped,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ExecResult {
     pub mem: MainMemory,
     pub regs: RegSet,
@@ -15,8 +16,16 @@ pub struct ExecResult {
     pub insts_retired: u64,
 }
 
+impl fmt::Debug for ExecResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExecResult")
+            .field("regs", &self.regs)
+            .finish()
+    }
+}
+
 pub trait Cpu {
-    fn new(prog: Program, in_regs: HashMap<ArchReg, u32>, in_mem: MainMemory) -> Self;
+    fn new(prog: Program, in_regs: RegSet, in_mem: MainMemory) -> Self;
 
     fn exec_all(self) -> ExecResult;
 }

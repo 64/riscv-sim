@@ -4,11 +4,15 @@ use associative_cache::*;
 const L1_CAPACITY_BYTES: usize = 16_000;
 const L2_CAPACITY_BYTES: usize = 32_000;
 const L3_CAPACITY_BYTES: usize = 128_000;
+const DRAM_CAPACITY_BYTES: usize = 256_000;
+
+pub const STACK_TOP: usize = DRAM_CAPACITY_BYTES - 2_000;
 
 const L1_LATENCY: u64 = 5;
 const L2_LATENCY: u64 = 20;
 const L3_LATENCY: u64 = 40;
 const DRAM_LATENCY: u64 = 400;
+// const DRAM_LATENCY: u64 = 1;
 
 #[derive(Debug, Clone, Default)]
 pub struct MainMemory {
@@ -106,7 +110,9 @@ impl Clone for MemoryHierarchy {
 
 impl MainMemory {
     pub fn new() -> Self {
-        Self { mem: vec![0; 120] }
+        Self {
+            mem: vec![0; DRAM_CAPACITY_BYTES],
+        }
     }
 
     pub fn readb(&self, addr: Addr) -> u32 {

@@ -102,8 +102,10 @@ impl ExecutionUnit {
     fn compute_result(&self, inst: &ReadyInst, mem: &mut MemoryHierarchy) -> EuResult {
         let val = match inst {
             Inst::Add(_, src0, src1) => src0.wrapping_add(*src1),
+            Inst::Sub(_, src0, src1) => src0.wrapping_sub(*src1),
             Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
             Inst::AndImm(_, src, imm) => src & imm.0,
+            Inst::Mul(_, src0, src1) => src0.wrapping_mul(*src1),
             Inst::Rem(_, src0, src1) => {
                 if *src1 == 0 {
                     *src0
@@ -112,6 +114,7 @@ impl ExecutionUnit {
                 }
             }
             Inst::ShiftLeftLogicalImm(_, src, imm) => src.wrapping_shl(imm.0),
+            Inst::SetLessThanImmU(_, src, imm) => (src < &imm.0).into(),
             Inst::BranchIfEqual(src0, src1, _) => (src0 == src1).into(),
             Inst::BranchIfNotEqual(src0, src1, _) => (src0 != src1).into(),
             Inst::BranchIfGreaterEqual(src0, src1, _) => (src0 >= src1).into(),

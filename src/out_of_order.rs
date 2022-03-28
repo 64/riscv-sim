@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     branch::BranchPredictor,
     cpu::{Cpu, ExecResult},
@@ -8,7 +6,7 @@ use crate::{
     lsq::LoadStoreQueue,
     mem::{MainMemory, MemoryHierarchy},
     program::Program,
-    regs::RegFile,
+    regs::{RegFile, RegSet},
     reservation_station::ReservationStation,
     rob::ReorderBuffer,
 };
@@ -75,7 +73,7 @@ pub struct OutOfOrder {
 }
 
 impl Cpu for OutOfOrder {
-    fn new(prog: Program, regs: HashMap<ArchReg, u32>, mem: MainMemory) -> Self {
+    fn new(prog: Program, regs: RegSet, mem: MainMemory) -> Self {
         Self {
             mem: MemoryHierarchy::new(mem),
             prog,
@@ -296,9 +294,12 @@ impl OutOfOrder {
 
                 match &inst {
                     Inst::Add(dst, _, _)
+                    | Inst::Sub(dst, _, _)
+                    | Inst::Mul(dst, _, _)
                     | Inst::Rem(dst, _, _)
                     | Inst::AddImm(dst, _, _)
                     | Inst::AndImm(dst, _, _)
+                    | Inst::SetLessThanImmU(dst, _, _)
                     | Inst::ShiftLeftLogicalImm(dst, _, _)
                     | Inst::LoadWord(dst, _) => {
                         if dst.arch != ArchReg::Zero {
@@ -358,10 +359,13 @@ impl OutOfOrder {
 
         match inst {
             Inst::Add(dst, _, _)
+            | Inst::Sub(dst, _, _)
+            | Inst::Mul(dst, _, _)
             | Inst::Rem(dst, _, _)
             | Inst::AddImm(dst, _, _)
             | Inst::AndImm(dst, _, _)
             | Inst::ShiftLeftLogicalImm(dst, _, _)
+            | Inst::SetLessThanImmU(dst, _, _)
             | Inst::LoadWord(dst, _) => {
                 if dst != ArchReg::Zero {
                     self.reg_file.release_phys();
