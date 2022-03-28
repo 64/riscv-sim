@@ -2,7 +2,7 @@ use aca::{
     inst::{Label, Pc},
     program::Program,
 };
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 #[test]
 fn parse_all() {

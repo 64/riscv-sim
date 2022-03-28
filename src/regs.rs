@@ -1,14 +1,11 @@
-use strum::IntoEnumIterator;
-
 use crate::{
     inst::{ArchReg, BothReg, Inst, MemRef, PhysReg, RenamedInst, Tag, ValueOrReg},
     mem,
     util::Addr,
 };
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt,
-};
+use hashbrown::HashMap;
+use std::{collections::VecDeque, fmt};
+use strum::IntoEnumIterator;
 
 #[derive(Clone, Default)]
 pub struct RegSet {

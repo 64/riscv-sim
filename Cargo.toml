@@ -11,7 +11,7 @@ debug = true
 
 [dependencies]
 associative-cache = "1.0.1"
-lru-mem = "0.2.0"
+hashbrown = "0.12.0"
 strum = { version = "0.24", features = ["derive"] }
 
 [dev-dependencies]

@@ -1,5 +1,6 @@
 use crate::inst::{Inst, Label, LabeledInst, Pc};
-use std::{collections::HashMap, str::FromStr};
+use hashbrown::HashMap;
+use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub struct Program {
