@@ -9,3 +9,4 @@ To run `asm/foo.asm`, use `$ cargo run --release -- foo`.
 * User space emulation
 * Macro-op fusion
 * Memory disambiguation prediction
+* Better branch prediction

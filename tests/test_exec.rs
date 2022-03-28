@@ -37,6 +37,8 @@ mod t {
         for i in 0..10 {
             assert_eq!(res.mem.readw(Addr(i * 4)), 0);
         }
+
+        assert_eq!(res.stats.insts_retired, 7);
     }
 
     #[test]

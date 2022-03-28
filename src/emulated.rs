@@ -1,5 +1,5 @@
 use crate::{
-    cpu::{Cpu, CpuState, ExecResult},
+    cpu::{Cpu, CpuState, ExecResult, Stats},
     inst::Inst,
     mem::MainMemory,
     program::Program,
@@ -12,16 +12,14 @@ pub struct Emulated {
     mem: MainMemory,
     prog: Program,
     pc: u32,
-    cycles: u64,
-    insts_retired: u64,
+    stats: Stats,
 }
 
 impl Cpu for Emulated {
     fn new(prog: Program, regs: RegSet, mem: MainMemory) -> Self {
         Self {
             pc: 0,
-            cycles: 0,
-            insts_retired: 0,
+            stats: Stats::default(),
             regs,
             mem,
             prog,
@@ -39,8 +37,7 @@ impl Cpu for Emulated {
         ExecResult {
             mem: self.mem,
             regs: self.regs,
-            cycles_taken: self.cycles,
-            insts_retired: self.insts_retired,
+            stats: self.stats,
         }
     }
 }
@@ -173,8 +170,8 @@ impl Emulated {
             self.pc += 1;
         }
 
-        self.insts_retired += 1;
-        self.cycles += next_inst.latency();
+        self.stats.insts_retired += 1;
+        self.stats.cycles_taken += next_inst.latency();
 
         CpuState::Running
     }

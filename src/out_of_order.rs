@@ -1,6 +1,6 @@
 use crate::{
     branch::BranchPredictor,
-    cpu::{Cpu, ExecResult},
+    cpu::{Cpu, ExecResult, Stats},
     execution_unit::{EuType, ExecutionUnit},
     inst::{ArchReg, Inst, RenamedInst, Tag, Tagged},
     lsq::LoadStoreQueue,
@@ -44,7 +44,6 @@ mod stages {
     pub struct Commit {
         pub inst: Option<Inst>,
         pub should_halt: bool,
-        pub retire: bool,
     }
 }
 
@@ -69,7 +68,7 @@ pub struct OutOfOrder {
     rob: ReorderBuffer,
     branch_predictor: BranchPredictor,
     reg_file: RegFile,
-    cycles: u64,
+    stats: Stats,
 }
 
 impl Cpu for OutOfOrder {
@@ -78,23 +77,22 @@ impl Cpu for OutOfOrder {
             mem: MemoryHierarchy::new(mem),
             prog,
             execution_units: vec![
-                ExecutionUnit::new(EuType::Alu),
-                ExecutionUnit::new(EuType::Alu),
                 ExecutionUnit::new(EuType::Branch),
                 ExecutionUnit::new(EuType::LoadStore),
+                ExecutionUnit::new(EuType::Alu),
+                ExecutionUnit::new(EuType::Alu),
                 ExecutionUnit::new(EuType::Special),
             ],
-            rob: ReorderBuffer::new(20),
-            lsq: LoadStoreQueue::new(10, 10),
-            reservation_station: ReservationStation::new(10),
-            reg_file: RegFile::new(regs, 32),
+            rob: ReorderBuffer::new(250),
+            lsq: LoadStoreQueue::new(70, 70),
+            reservation_station: ReservationStation::new(100),
+            reg_file: RegFile::new(regs, 200),
             branch_predictor: BranchPredictor::new(),
-            cycles: 0,
+            stats: Stats::default(),
         }
     }
 
     fn exec_all(mut self) -> ExecResult {
-        let mut insts_retired = 0;
         let mut pipe = Pipeline::default();
 
         loop {
@@ -108,13 +106,8 @@ impl Cpu for OutOfOrder {
                 return ExecResult {
                     regs: self.reg_file.get_reg_set(),
                     mem: self.mem.main,
-                    cycles_taken: self.cycles,
-                    insts_retired,
+                    stats: self.stats,
                 };
-            }
-
-            if commit.retire {
-                insts_retired += 1;
             }
 
             if let Some(next_pc) = writeback.next_fetch {
@@ -154,7 +147,7 @@ impl Cpu for OutOfOrder {
                 }
             }
 
-            self.cycles += 1;
+            self.stats.cycles_taken += 1;
 
             #[cfg(debug_assertions)]
             if std::env::var("SINGLE_STEP").is_ok() {
@@ -162,7 +155,7 @@ impl Cpu for OutOfOrder {
                 std::io::stdin().read_line(&mut String::new()).unwrap();
             }
 
-            debug_assert!(self.cycles < 100_000, "infinite loop detected");
+            debug_assert!(self.stats.cycles_taken < 100_000, "infinite loop detected");
         }
     }
 }
@@ -179,7 +172,7 @@ impl OutOfOrder {
     }
 
     fn stage_fetch_decode(&mut self, pipe: &Pipeline) -> stages::FetchDecode {
-        let tag = Tag::from(self.cycles); // Assumes we only fetch 1 instruction per cycle.
+        let tag = Tag::from(self.stats.cycles_taken); // Assumes we only fetch 1 instruction per cycle.
 
         // Branch prediction
         let pc = pipe.fetch_decode.next_pc;
@@ -218,14 +211,22 @@ impl OutOfOrder {
             None => return stages::Rename::default(),
         };
 
-        if self.rob.is_full() || self.reservation_station.is_full() {
-            return stages::Rename {
-                inst: None,
-                should_stall: true,
-            };
+        let mut stall = false;
+
+        if self.rob.is_full() {
+            self.stats.rob_stalls += 1;
+            stall = true;
+        }
+        if self.reservation_station.is_full() {
+            self.stats.reservation_station_stalls += 1;
+            stall = true;
+        }
+        if inst.is_mem_access() && !self.lsq.has_space(&inst) {
+            self.stats.lsq_stalls += 1;
+            stall = true;
         }
 
-        if inst.is_mem_access() && !self.lsq.has_space(&inst) {
+        if stall {
             return stages::Rename {
                 inst: None,
                 should_stall: true,
@@ -245,6 +246,7 @@ impl OutOfOrder {
                 should_stall: false,
             }
         } else {
+            self.stats.phys_reg_stalls += 1;
             stages::Rename {
                 inst: None,
                 should_stall: true,
@@ -280,7 +282,7 @@ impl OutOfOrder {
     // Advance execution of all the execution units.
     fn stage_execute(&mut self, _pipe: &Pipeline) -> stages::Execute {
         for eu in &mut self.execution_units {
-            eu.advance(&mut self.mem);
+            eu.advance(&mut self.mem, &mut self.stats);
         }
 
         stages::Execute
@@ -316,6 +318,7 @@ impl OutOfOrder {
                             self.reg_file.end_predict(tag, taken, predicted_taken)
                         {
                             // Flush
+                            self.stats.mispredicts += 1;
                             self.kill_tags_after(tag);
                             next_fetch = Some(next_pc);
                         }
@@ -350,7 +353,6 @@ impl OutOfOrder {
                 return stages::Commit {
                     inst: Some(Inst::Halt),
                     should_halt: true,
-                    retire: false,
                 }
             }
             Some(tagged) => tagged,
@@ -383,10 +385,10 @@ impl OutOfOrder {
             _ => unimplemented!("{:?}", inst),
         }
 
+        self.stats.insts_retired += 1;
         stages::Commit {
             inst: Some(inst),
             should_halt: false,
-            retire: true,
         }
     }
 

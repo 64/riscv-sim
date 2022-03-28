@@ -15,11 +15,8 @@ mod rob;
 mod util;
 
 use crate::{cpu::Cpu, inst::ArchReg, mem::MainMemory, regs::RegSet};
-use std::time::Instant;
 
 fn main() {
-    let start = Instant::now();
-
     let file = std::env::args()
         .nth(1)
         .expect("required input file as argument argument");
@@ -44,18 +41,5 @@ fn main() {
     // let res = emulated::Emulated::new(prog, initial_regs, MainMemory::new()).exec_all();
     // let res = pipelined::Pipelined::new(prog, initial_regs, MainMemory::new()).exec_all();
     let res = out_of_order::OutOfOrder::new(prog, initial_regs, MainMemory::new()).exec_all();
-    dbg!(&res);
-
-    println!("    EXECUTION COMPLETED");
-    println!("    =====================");
-    println!("    Instructions retired: {}", res.insts_retired);
-    println!("            Cycles taken: {}", res.cycles_taken);
-    println!(
-        "  Instructions per clock: {:.2}",
-        res.insts_retired as f32 / res.cycles_taken as f32
-    );
-    println!(
-        "  Simulator time elapsed: {:.2}s",
-        start.elapsed().as_secs_f32()
-    );
+    println!("{res}");
 }

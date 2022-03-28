@@ -1,4 +1,5 @@
 use crate::{
+    cpu::Stats,
     inst::{ExecutedInst, Inst, ReadyInst, Tag, Tagged},
     mem::MemoryHierarchy,
 };
@@ -21,7 +22,6 @@ type CyclesTaken = u64;
 #[derive(Debug, Clone)]
 pub struct ExecutionUnit {
     eu_type: EuType,
-    begin_inst: Option<Tagged<ReadyInst>>,
     executing_inst: Option<(Tagged<ReadyInst>, CyclesTaken)>,
     completed_inst: Option<(Tagged<ExecutedInst>, EuResult)>,
 }
@@ -32,25 +32,24 @@ impl ExecutionUnit {
     pub fn new(eu_type: EuType) -> Self {
         Self {
             eu_type,
-            begin_inst: Default::default(),
             executing_inst: Default::default(),
             completed_inst: Default::default(),
         }
     }
 
     pub fn can_execute(&self, inst: &ReadyInst) -> bool {
-        self.eu_type == inst.eu_type() && self.begin_inst.is_none() && self.executing_inst.is_none()
+        self.eu_type == inst.eu_type() && self.executing_inst.is_none()
     }
 
     pub fn begin_execute(&mut self, inst: ReadyInst, tag: Tag) {
         debug_assert!(self.can_execute(&inst));
-        self.begin_inst = Some(Tagged { tag, inst });
+        self.executing_inst = Some((Tagged { tag, inst }, 0));
     }
 
-    pub fn advance(&mut self, mem: &mut MemoryHierarchy) {
+    pub fn advance(&mut self, mem: &mut MemoryHierarchy, stats: &mut Stats) {
         if let Some((Tagged { tag, inst }, cycles)) = self.executing_inst.take() {
             let is_done = if inst.is_mem_access() {
-                mem.access_complete(tag, inst.access_addr())
+                mem.access_complete(tag, inst.access_addr(), stats)
             } else {
                 cycles + 1 >= inst.latency()
             };
@@ -72,8 +71,6 @@ impl ExecutionUnit {
                 // Increment cycles, and carry on.
                 self.executing_inst = Some((Tagged { tag, inst }, cycles + 1));
             }
-        } else if let Some(tagged) = self.begin_inst.take() {
-            self.executing_inst = Some((tagged, 0));
         }
     }
 
@@ -82,11 +79,6 @@ impl ExecutionUnit {
     }
 
     pub fn kill_tags_after(&mut self, tag: Tag) {
-        if let Some(tagged) = &self.begin_inst {
-            if tagged.tag > tag {
-                self.begin_inst = None;
-            }
-        }
         if let Some((tagged, _)) = &self.executing_inst {
             if tagged.tag > tag {
                 self.executing_inst = None;

@@ -1,5 +1,5 @@
 use crate::{
-    cpu::{Cpu, ExecResult},
+    cpu::{Cpu, ExecResult, Stats},
     inst::Inst,
     mem::MainMemory,
     program::Program,
@@ -27,7 +27,6 @@ mod stages {
     pub struct Execute {
         pub inst: Option<Inst>,
         pub should_stall: bool,
-        // pub cycles_spent: u64,
         pub alu_or_mem_val: u32,
         pub mem_addr: Addr,
     }
@@ -42,7 +41,6 @@ mod stages {
     pub struct Writeback {
         pub jump_target: Option<u32>,
         pub should_halt: bool,
-        pub retire: bool,
     }
 }
 
@@ -60,6 +58,7 @@ pub struct Pipelined {
     regs: RegSet,
     mem: MainMemory,
     prog: Program,
+    stats: Stats,
     is_stalled: bool,
 }
 
@@ -67,15 +66,14 @@ impl Cpu for Pipelined {
     fn new(prog: Program, regs: RegSet, mem: MainMemory) -> Self {
         Self {
             regs,
-            is_stalled: false,
             mem,
             prog,
+            stats: Stats::default(),
+            is_stalled: false,
         }
     }
 
     fn exec_all(mut self) -> ExecResult {
-        let mut cycles = 0;
-        let mut insts_retired = 0;
         let mut pipe = Pipeline::default();
 
         loop {
@@ -89,13 +87,8 @@ impl Cpu for Pipelined {
                 return ExecResult {
                     regs: self.regs,
                     mem: self.mem,
-                    cycles_taken: cycles,
-                    insts_retired,
+                    stats: self.stats,
                 };
-            }
-
-            if writeback.retire {
-                insts_retired += 1;
             }
 
             if execute.should_stall {
@@ -128,14 +121,14 @@ impl Cpu for Pipelined {
                 };
             }
 
-            cycles += 1;
+            self.stats.cycles_taken += 1;
 
             if std::env::var("SINGLE_STEP").is_ok() {
                 dbg!(&pipe);
                 std::io::stdin().read_line(&mut String::new()).unwrap();
             }
 
-            debug_assert!(cycles < 100_000, "infinite loop detected");
+            debug_assert!(self.stats.cycles_taken < 100_000, "infinite loop detected");
         }
     }
 }
@@ -321,7 +314,6 @@ impl Pipelined {
                 return stages::Writeback {
                     jump_target: None,
                     should_halt: true,
-                    retire: false,
                 }
             }
             Some(inst) => inst.clone(),
@@ -329,7 +321,6 @@ impl Pipelined {
                 return stages::Writeback {
                     jump_target: None,
                     should_halt: false,
-                    retire: false,
                 }
             }
         };
@@ -367,10 +358,10 @@ impl Pipelined {
             _ => unimplemented!("{:?}", inst),
         }
 
+        self.stats.insts_retired += 1;
         stages::Writeback {
             jump_target,
             should_halt: false,
-            retire: true,
         }
     }
 }

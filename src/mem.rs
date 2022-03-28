@@ -1,4 +1,4 @@
-use crate::{inst::Tag, util::Addr};
+use crate::{cpu::Stats, inst::Tag, util::Addr};
 use associative_cache::*;
 
 const L1_CAPACITY_BYTES: usize = 16_000;
@@ -22,6 +22,7 @@ pub struct MainMemory {
 #[derive(Debug, Clone)]
 pub struct Pending {
     tag: Tag,
+    addr: Addr,
     current: u64,
     end: u64,
 }
@@ -46,23 +47,41 @@ impl MemoryHierarchy {
         }
     }
 
-    pub fn access_complete(&mut self, tag: Tag, addr: Addr) -> bool {
+    pub fn access_complete(&mut self, tag: Tag, addr: Addr, stats: &mut Stats) -> bool {
         match self.pending_fetches.iter().find(|p| p.tag == tag) {
             Some(p) => p.current >= p.end,
             None => {
                 let addr = addr.to_cache_line();
-                let latency = if self.l1.get(&addr).is_some() {
+                let latency = if let Some(_p) = self
+                    .pending_fetches
+                    .iter()
+                    .filter(|p| p.addr == addr)
+                    .min_by_key(|p| p.end)
+                {
+                    // If we have an outstanding fetch to an addr, only wait until that one
+                    // completes. Otherwise dram fetch + (wait n cycles) + dram fetch to same addr will take
+                    // very long.
+                    unreachable!();
+                    // L1_LATENCY + (p.end - p.current)
+                } else if self.l1.get(&addr).is_some() {
                     L1_LATENCY
                 } else if self.l2.get(&addr).is_some() {
+                    stats.l1_miss += 1;
                     L2_LATENCY
                 } else if self.l3.get(&addr).is_some() {
+                    stats.l1_miss += 1;
+                    stats.l2_miss += 1;
                     L3_LATENCY
                 } else {
+                    stats.l1_miss += 1;
+                    stats.l2_miss += 1;
+                    stats.l3_miss += 1;
                     DRAM_LATENCY
                 };
 
                 self.pending_fetches.push(Pending {
                     tag,
+                    addr,
                     current: 0,
                     end: latency,
                 });
