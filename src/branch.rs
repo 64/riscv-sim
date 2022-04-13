@@ -35,4 +35,6 @@ impl BranchPredictor {
         // false
         // true
     }
+
+    pub fn update_prediction(&mut self, pc: u32, target: u32, taken: bool) { todo!() }
 }

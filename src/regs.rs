@@ -104,6 +104,8 @@ impl RegFile {
     pub fn end_predict(&mut self, branch: Tag, taken: bool, predicted: bool) -> Option<u32> {
         let branch_info = self.branch_info.remove(&branch).unwrap();
 
+        // branch_predictor.update_prediction(/* ... */);
+
         if taken != predicted {
             self.rat = branch_info.rat_cp;
 
