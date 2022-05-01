@@ -129,6 +129,7 @@ impl ExecutionUnit {
                     *src0 / *src1
                 }
             }
+            Inst::JumpAndLinkRegister(_, src, imm) => src.wrapping_add(imm.0),
             Inst::ShiftLeftLogicalImm(_, src, imm) => src.wrapping_shl(imm.0),
             Inst::SetLessThanImmU(_, src, imm) => (src < &imm.0).into(),
             Inst::JumpAndLink(_, imm) => imm.0,

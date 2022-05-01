@@ -1,47 +1,71 @@
-// use lru_mem::LruCache;
+#![allow(dead_code, unused)]
 
-// #[derive(Debug, Clone)]
-// pub struct BranchTargetBuffer {
-//     cache: LruCache<u32, u32>, // PC -> Addr
-// }
+use associative_cache::*;
+use hashbrown::HashMap;
+
+use crate::{inst::AbsPc, util::CacheCapacity};
+
+#[derive(Debug, Default)]
+pub struct BranchTargetBuffer {
+    cache: AssociativeCache<
+        AbsPc,
+        WithLruTimestamp<AbsPc>,
+        CacheCapacity<512>,
+        HashFourWay,
+        LruReplacement,
+    >,
+}
+
+impl Clone for BranchTargetBuffer {
+    fn clone(&self) -> Self {
+        Default::default()
+    }
+}
+
+impl BranchTargetBuffer {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            cache: AssociativeCache::default(),
+        }
+    }
+
+    pub fn get(&mut self, pc: AbsPc) -> Option<AbsPc> {
+        self.cache
+            .get(&pc)
+            .cloned()
+            .map(|ent| WithLruTimestamp::into_inner(ent))
+    }
+
+    pub fn add_entry(&mut self, pc: AbsPc, target: AbsPc) {
+        self.cache.insert(pc, WithLruTimestamp::new(target));
+    }
+}
 
 #[derive(Debug, Clone, Default)]
-pub struct BranchPredictor;
-
-// impl BranchTargetBuffer {
-//     pub fn new(capacity: usize) -> Self {
-//         Self {
-//             cache: LruCache::new(capacity),
-//         }
-//     }
-
-//     pub fn get(&mut self, pc: u32) -> Option<u32> {
-//         self.cache.get(&pc).copied()
-//     }
-
-//     pub fn add_entry(&mut self, pc: u32, target: u32) {
-//         self.cache.insert(pc, target).unwrap();
-//     }
-// }
+pub struct BranchPredictor {
+    btb: BranchTargetBuffer,
+    last_taken_map: HashMap<AbsPc, bool>,
+}
 
 impl BranchPredictor {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
-    pub fn predict_taken(&self, pc: u32, target: u32) -> bool {
-        // BTFNT
-        target < pc
-        // false
-        // true
+    pub fn predict_direct(&self, pc: AbsPc, target: AbsPc) -> bool {
+        // Simple one-bit history table with static BT, FNT fallback
+        self.last_taken_map.get(&pc).copied().unwrap_or(target < pc)
     }
 
-    #[allow(dead_code)]
-    pub fn update_prediction(&mut self, _pc: u32, _target: u32, _taken: bool) {
-        todo!()
+    pub fn update_predict_direct(&mut self, pc: AbsPc, taken: bool) {
+        self.last_taken_map.insert(pc, taken);
     }
 
-    pub fn predict_indirect(&self, _pc: u32) -> Option<u32> {
-        None
+    pub fn update_predict_indirect(&mut self, pc: AbsPc, target: AbsPc) {
+        self.btb.add_entry(pc, target);
+    }
+
+    pub fn predict_indirect(&mut self, pc: AbsPc) -> Option<AbsPc> {
+        self.btb.get(pc)
     }
 }

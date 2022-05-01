@@ -1,5 +1,8 @@
 use crate::{
-    inst::{ArchReg, BothReg, Inst, MemRef, PhysReg, RenamedInst, Tag, ValueOrReg},
+    branch::BranchPredictor,
+    inst::{
+        AbsPc, ArchReg, BothReg, Inst, MemRef, PhysReg, RenamedInst, Tag, ValueOrReg, INST_SIZE,
+    },
     mem,
     util::Addr,
 };
@@ -14,15 +17,26 @@ pub struct RegSet {
 
 type AliasTable = HashMap<ArchReg, PhysReg>;
 
+#[derive(Debug, Clone)]
+enum BranchType {
+    Direct {
+        taken: bool,
+        taken_pc: AbsPc,
+        not_taken_pc: AbsPc,
+    },
+    Indirect {
+        predicted_pc: Option<AbsPc>,
+        inst_pc: AbsPc,
+    },
+}
+
 // See https://docs.boom-core.org/en/latest/sections/rename-stage.html#the-free-list
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BranchInfo {
     // Options because we snapshot during rename (so that everything is in-order)
     rat_cp: Option<AliasTable>,
     alloc_list: Option<Vec<PhysReg>>,
-    taken: bool,
-    taken_pc: u32,
-    not_taken_pc: u32,
+    info: BranchType,
 }
 
 #[derive(Clone)]
@@ -91,55 +105,134 @@ impl RegFile {
     }
 
     pub fn was_predicted_taken(&self, branch: Tag) -> bool {
-        self.branch_info.get(&branch).expect("no branch").taken
+        match self.branch_info.get(&branch).expect("no branch").info {
+            BranchType::Direct { taken, .. } => taken,
+            _ => unreachable!(),
+        }
     }
 
-    pub fn begin_predict(&mut self, branch: Tag, taken: bool, taken_pc: u32, not_taken_pc: u32) {
+    pub fn begin_predict_direct(
+        &mut self,
+        branch: Tag,
+        taken: bool,
+        taken_pc: AbsPc,
+        not_taken_pc: AbsPc,
+    ) {
         self.branch_info.insert(
             branch,
             BranchInfo {
                 rat_cp: None,
                 alloc_list: None,
-                taken,
-                taken_pc,
-                not_taken_pc,
+                info: BranchType::Direct {
+                    taken,
+                    taken_pc,
+                    not_taken_pc,
+                },
             },
         );
     }
 
-    pub fn end_predict(&mut self, branch: Tag, taken: bool, predicted: bool) -> Option<u32> {
+    pub fn begin_predict_indirect(
+        &mut self,
+        branch: Tag,
+        predicted_pc: Option<AbsPc>,
+        inst_pc: AbsPc,
+    ) {
+        self.branch_info.insert(
+            branch,
+            BranchInfo {
+                rat_cp: None,
+                alloc_list: None,
+                info: BranchType::Indirect {
+                    predicted_pc,
+                    inst_pc,
+                },
+            },
+        );
+    }
+
+    pub fn end_predict_indirect(
+        &mut self,
+        branch: Tag,
+        actual_pc: AbsPc,
+        predicted_pc: Option<AbsPc>,
+        branch_predictor: &mut BranchPredictor,
+    ) {
         let branch_info = self.branch_info.remove(&branch).unwrap();
 
-        // branch_predictor.update_prediction(/* ... */);
+        match branch_info.info {
+            BranchType::Indirect { inst_pc, .. } => {
+                branch_predictor.update_predict_indirect(inst_pc, actual_pc);
+            }
+            _ => unreachable!(),
+        }
+
+        if predicted_pc
+            .map(|predicted_pc| actual_pc != predicted_pc)
+            .unwrap_or(false)
+        {
+            self.mispredict(branch, &branch_info);
+        }
+    }
+
+    pub fn end_predict_direct(
+        &mut self,
+        branch: Tag,
+        taken: bool,
+        predicted: bool,
+        branch_predictor: &mut BranchPredictor,
+    ) -> Option<AbsPc> {
+        let branch_info = self.branch_info.remove(&branch).unwrap();
+
+        match branch_info.info {
+            BranchType::Direct { not_taken_pc, .. } => {
+                let inst_pc = not_taken_pc - INST_SIZE;
+                branch_predictor.update_predict_direct(inst_pc, taken);
+            }
+            _ => unreachable!(),
+        }
 
         if taken != predicted {
-            let alloc_list = branch_info.alloc_list.unwrap();
-            self.rat = branch_info.rat_cp.unwrap();
+            self.mispredict(branch, &branch_info);
 
-            let num_removed = alloc_list.len();
-
-            for phys_reg in alloc_list {
-                self.phys_rf.0[usize::from(phys_reg)] = PrfEntry::Free;
-                self.prrt.pop_back().unwrap();
-            }
-
-            // self.branch_info.iter().for_each(|(&t, _)| debug_assert!(t >= tag));
-            self.branch_info.retain(|&t, _| t <= branch);
-
-            // Is this needed?
-            for bi in self.branch_info.values_mut() {
-                for _ in 0..num_removed {
-                    bi.alloc_list.as_mut().map(|al| al.pop().unwrap());
+            match branch_info.info {
+                BranchType::Direct {
+                    taken_pc,
+                    not_taken_pc,
+                    ..
+                } => {
+                    if taken {
+                        Some(taken_pc)
+                    } else {
+                        Some(not_taken_pc)
+                    }
                 }
-            }
-
-            if taken {
-                Some(branch_info.taken_pc)
-            } else {
-                Some(branch_info.not_taken_pc)
+                _ => unreachable!(),
             }
         } else {
             None
+        }
+    }
+
+    fn mispredict(&mut self, tag: Tag, info: &BranchInfo) {
+        let alloc_list = info.alloc_list.as_ref().unwrap();
+        self.rat = info.rat_cp.as_ref().unwrap().clone();
+
+        let num_removed = alloc_list.len();
+
+        for &phys_reg in alloc_list {
+            self.phys_rf.0[usize::from(phys_reg)] = PrfEntry::Free;
+            self.prrt.pop_back().unwrap();
+        }
+
+        // self.branch_info.iter().for_each(|(&t, _)| debug_assert!(t >= tag));
+        self.branch_info.retain(|&t, _| t <= tag);
+
+        // Is this needed?
+        for bi in self.branch_info.values_mut() {
+            for _ in 0..num_removed {
+                bi.alloc_list.as_mut().map(|al| al.pop().unwrap());
+            }
         }
     }
 
@@ -242,6 +335,16 @@ impl RegFile {
             },
             Some,
         )
+    }
+
+    pub fn predicted_addr(&self, tag: Tag) -> (Option<AbsPc>, AbsPc) {
+        match self.branch_info.get(&tag).expect("no branch info").info {
+            BranchType::Indirect {
+                predicted_pc,
+                inst_pc,
+            } => (predicted_pc, inst_pc),
+            _ => unreachable!(),
+        }
     }
 }
 

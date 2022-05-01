@@ -57,8 +57,9 @@ impl FromStr for Program {
 }
 
 impl Program {
-    pub fn fetch(&self, ip: u32) -> Option<&Inst> {
-        debug_assert_eq!(ip % 4, 0);
-        self.insts.get(usize::try_from(ip / 4).unwrap())
+    pub fn fetch(&self, pc: AbsPc) -> Option<&Inst> {
+        let pc = pc.0;
+        debug_assert_eq!(pc % 4, 0);
+        self.insts.get(usize::try_from(pc / 4).unwrap())
     }
 }

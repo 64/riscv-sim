@@ -18,11 +18,13 @@ pub struct Stats {
     pub start: Instant,
     pub cycles_taken: u64,
     pub insts_retired: u64,
-    pub mispredicts: u64,
+    pub direct_mispredicts: u64,
+    pub indirect_mispredicts: u64,
     pub rob_stalls: u64,
     pub reservation_station_stalls: u64,
     pub lsq_stalls: u64,
     pub phys_reg_stalls: u64,
+    pub fetch_stalls: u64,
     pub l1_miss: u64,
     pub l2_miss: u64,
     pub l3_miss: u64,
@@ -47,11 +49,13 @@ impl Default for Stats {
         Self {
             cycles_taken: 0,
             insts_retired: 0,
-            mispredicts: 0,
+            direct_mispredicts: 0,
+            indirect_mispredicts: 0,
             rob_stalls: 0,
             reservation_station_stalls: 0,
             lsq_stalls: 0,
             phys_reg_stalls: 0,
+            fetch_stalls: 0,
             l1_miss: 0,
             l2_miss: 0,
             l3_miss: 0,
@@ -102,11 +106,25 @@ impl fmt::Display for ExecResult {
                 self.stats.reservation_station_stalls
             )?;
         }
+        if self.stats.fetch_stalls != 0 {
+            writeln!(f, "            Fetch stalls: {}", self.stats.fetch_stalls)?;
+        }
         if self.stats.rob_stalls != 0 {
             writeln!(f, "   Reorder buffer stalls: {}", self.stats.rob_stalls)?;
         }
-        if self.stats.mispredicts != 0 {
-            writeln!(f, "      Branch mispredicts: {}", self.stats.mispredicts)?;
+        if self.stats.direct_mispredicts != 0 {
+            writeln!(
+                f,
+                "      Direct mispredicts: {}",
+                self.stats.direct_mispredicts
+            )?;
+        }
+        if self.stats.indirect_mispredicts != 0 {
+            writeln!(
+                f,
+                "    Indirect mispredicts: {}",
+                self.stats.indirect_mispredicts
+            )?;
         }
         if self.stats.l1_miss != 0 {
             writeln!(f, "         L1 cache misses: {}", self.stats.l1_miss)?;

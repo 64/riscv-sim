@@ -1,6 +1,6 @@
 use crate::{
     cpu::{Cpu, CpuState, ExecResult, Stats},
-    inst::{Inst, INST_SIZE},
+    inst::{AbsPc, Inst, INST_SIZE},
     mem::MainMemory,
     program::Program,
     regs::RegSet,
@@ -11,14 +11,14 @@ pub struct Emulated {
     regs: RegSet,
     mem: MainMemory,
     prog: Program,
-    pc: u32,
+    pc: AbsPc,
     stats: Stats,
 }
 
 impl Cpu for Emulated {
     fn new(prog: Program, regs: RegSet, mem: MainMemory) -> Self {
         Self {
-            pc: 0,
+            pc: AbsPc(0),
             stats: Stats::default(),
             regs,
             mem,
@@ -138,16 +138,15 @@ impl Emulated {
                 self.regs.set(dst, u32::from_le_bytes(val.to_le_bytes()));
             }
             Inst::JumpAndLink(dst, tgt) => {
-                self.regs.set(dst, self.pc + INST_SIZE);
+                self.regs.set(dst, (self.pc + INST_SIZE).0);
                 self.pc = tgt.into();
                 advance_pc = false;
             }
             Inst::JumpAndLinkRegister(dst, src, off) => {
-                assert_eq!(off.0, 0);
-
-                self.regs.set(dst, self.pc + INST_SIZE);
                 // TODO: we prob should sign extend the off value in the assembler
-                self.pc = self.regs.get(src).wrapping_add(off.0);
+                assert_eq!(off.0, 0);
+                self.regs.set(dst, (self.pc + INST_SIZE).0);
+                self.pc = AbsPc(self.regs.get(src).wrapping_add(off.0) & !1);
                 advance_pc = false;
             }
             Inst::BranchIfEqual(src0, src1, tgt) => {

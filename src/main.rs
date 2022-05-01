@@ -52,8 +52,8 @@ fn main() {
         .unwrap_or(0);
     let initial_regs = RegSet::from([(ArchReg::A0, a0), (ArchReg::A1, a1)]);
 
-    let res = emulated::Emulated::new(prog, initial_regs, mem).exec_all();
-    // let res = out_of_order::OutOfOrder::new(prog, initial_regs, mem).exec_all();
+    // let res = emulated::Emulated::new(prog, initial_regs, mem).exec_all();
+    let res = out_of_order::OutOfOrder::new(prog, initial_regs, mem).exec_all();
 
     use std::io::Write;
     let mut f = std::fs::File::create("/tmp/mem.txt").expect("Unable to create file");

@@ -1,8 +1,10 @@
+use hashbrown::HashMap;
+
 use crate::{
     branch::BranchPredictor,
     cpu::{Cpu, ExecResult, Stats},
     execution_unit::{EuType, ExecutionUnit},
-    inst::{ArchReg, ExecutedInst, Inst, RenamedInst, Tag, Tagged, INST_SIZE},
+    inst::{AbsPc, ArchReg, ExecutedInst, Inst, RenamedInst, Tag, Tagged, INST_SIZE},
     lsq::LoadStoreQueue,
     mem::{MainMemory, MemoryHierarchy},
     program::Program,
@@ -17,16 +19,22 @@ mod stages {
     pub mod narrow {
         use super::*;
 
-        #[derive(Debug, Clone, Default)]
+        #[derive(Debug, Clone)]
+        pub struct FetchDecode {
+            pub inst: Tagged<Inst>,
+            pub next_pc: Option<AbsPc>, // None if we should stall
+        }
+
+        #[derive(Debug, Clone)]
         pub struct Rename {
             pub inst: Option<RenamedInst>,
             pub should_stall: bool,
         }
 
-        #[derive(Debug, Clone, Default)]
+        #[derive(Debug, Clone)]
         pub struct Writeback {
             pub inst: Option<Tagged<ExecutedInst>>,
-            pub next_fetch: Option<u32>,
+            pub next_fetch: Option<AbsPc>,
         }
     }
 
@@ -36,7 +44,8 @@ mod stages {
         #[derive(Debug, Clone, Default)]
         pub struct FetchDecode {
             pub insts: Vec<Tagged<Inst>>,
-            pub next_pcs: Vec<u32>,
+            pub next_pcs: Vec<AbsPc>,
+            pub stalled: bool,
         }
 
         #[derive(Debug, Clone, Default)]
@@ -48,7 +57,7 @@ mod stages {
         #[derive(Debug, Clone, Default)]
         pub struct Writeback {
             pub insts: Vec<Tagged<ExecutedInst>>,
-            pub next_fetch: Option<u32>,
+            pub next_fetch: Option<AbsPc>,
         }
     }
 
@@ -72,6 +81,7 @@ pub struct OutOfOrder {
     mem: MemoryHierarchy,
     prog: Program,
     execution_units: Vec<ExecutionUnit>,
+    pc_map: HashMap<Tag, AbsPc>,
     reservation_station: ReservationStation,
     lsq: LoadStoreQueue,
     rob: ReorderBuffer,
@@ -96,6 +106,7 @@ impl Cpu for OutOfOrder {
             ],
             rob: ReorderBuffer::new(250),
             lsq: LoadStoreQueue::new(70, 70),
+            pc_map: HashMap::new(),
             reservation_station: ReservationStation::new(100),
             reg_file: RegFile::new(regs, 200),
             branch_predictor: BranchPredictor::new(),
@@ -105,7 +116,7 @@ impl Cpu for OutOfOrder {
 
     fn exec_all(mut self) -> ExecResult {
         let mut pipe = Pipeline::default();
-        pipe.fetch_decode.next_pcs.push(0);
+        pipe.fetch_decode.next_pcs.push(AbsPc(0));
 
         loop {
             self.mem.tick();
@@ -130,6 +141,7 @@ impl Cpu for OutOfOrder {
                     fetch_decode: stages::wide::FetchDecode {
                         insts: Vec::new(),
                         next_pcs: vec![next_pc],
+                        stalled: false,
                     },
                     rename: stages::wide::Rename::default(),
                     writeback,
@@ -183,7 +195,7 @@ impl OutOfOrder {
     }
 
     // TODO: narrow
-    fn fetch_decode_one(&mut self, pc: u32, tag: Tag) -> (Tagged<Inst>, u32) {
+    fn fetch_decode_one(&mut self, pc: AbsPc, tag: Tag) -> stages::narrow::FetchDecode {
         let inst = self.prog.fetch(pc).cloned().unwrap_or(Inst::Halt);
 
         // Branch prediction
@@ -192,31 +204,54 @@ impl OutOfOrder {
             | Inst::BranchIfNotEqual(_, _, tgt)
             | Inst::BranchIfLess(_, _, tgt)
             | Inst::BranchIfGreaterEqual(_, _, tgt) => {
-                let taken_pc = u32::from(*tgt);
+                let taken_pc = *tgt;
                 let not_taken_pc = pc + INST_SIZE;
-                let predict_taken = self.branch_predictor.predict_taken(pc, taken_pc);
+                let predict_taken = self.branch_predictor.predict_direct(pc, taken_pc);
 
                 self.reg_file
-                    .begin_predict(tag, predict_taken, taken_pc, not_taken_pc);
+                    .begin_predict_direct(tag, predict_taken, taken_pc, not_taken_pc);
 
                 if predict_taken {
-                    taken_pc
+                    Some(taken_pc)
                 } else {
-                    not_taken_pc
+                    Some(not_taken_pc)
                 }
             }
-            Inst::JumpAndLink(_, tgt) => u32::from(*tgt),
-            Inst::JumpAndLinkRegister(_, _, _) => unimplemented!("jalr"),
-            // Inst::Jump(tgt) => u32::from(*tgt),
-            _ => pc + INST_SIZE,
+            Inst::JumpAndLink(_, tgt) => {
+                self.pc_map.insert(tag, pc);
+                Some(*tgt)
+            }
+            Inst::JumpAndLinkRegister(_, _, _) => {
+                let predicted_addr = self.branch_predictor.predict_indirect(pc);
+                self.reg_file
+                    .begin_predict_indirect(tag, predicted_addr, pc);
+                predicted_addr
+            }
+            _ => Some(pc + INST_SIZE),
         };
 
-        (Tagged { inst, tag }, next_pc)
+        stages::narrow::FetchDecode {
+            inst: Tagged { inst, tag },
+            next_pc,
+        }
     }
 
     fn stage_fetch_decode(&mut self, pipe: &Pipeline) -> stages::wide::FetchDecode {
-        let mut insts = vec![];
-        let mut next_pcs = vec![*pipe.fetch_decode.next_pcs.last().unwrap()];
+        let next_pc = match pipe.fetch_decode.next_pcs.last() {
+            Some(next_pc) => *next_pc,
+            None => {
+                // Stalled.
+                return stages::wide::FetchDecode {
+                    insts: Vec::new(),
+                    next_pcs: Vec::new(),
+                    stalled: true,
+                };
+            }
+        };
+
+        let mut insts = Vec::new();
+        let mut next_pcs = vec![next_pc];
+        let mut stalled = false;
 
         for i in 0..PIPE_WIDTH {
             if self.rob.last_is_halt() {
@@ -226,11 +261,23 @@ impl OutOfOrder {
             let tag = Tag::from(PIPE_WIDTH * self.stats.cycles_taken + i);
 
             let res = self.fetch_decode_one(*next_pcs.last().unwrap(), tag);
-            insts.push(res.0);
-            next_pcs.push(res.1);
+
+            insts.push(res.inst);
+
+            if let Some(next_pc) = res.next_pc {
+                next_pcs.push(next_pc);
+            } else {
+                self.stats.fetch_stalls += 1;
+                stalled = true;
+                break;
+            }
         }
 
-        stages::wide::FetchDecode { insts, next_pcs }
+        stages::wide::FetchDecode {
+            insts,
+            next_pcs,
+            stalled,
+        }
     }
 
     fn stage_rename(&mut self, pipe: &Pipeline) -> stages::wide::Rename {
@@ -256,6 +303,7 @@ impl OutOfOrder {
             Some(stages::wide::FetchDecode {
                 insts: pipe.fetch_decode.insts[num_renamed..].to_vec(),
                 next_pcs: pipe.fetch_decode.next_pcs[num_renamed..].to_vec(),
+                stalled: false,
             })
         } else {
             None
@@ -388,8 +436,7 @@ impl OutOfOrder {
                     | Inst::LoadWord(dst, _)
                     | Inst::LoadHalfWord(dst, _)
                     | Inst::LoadByte(dst, _)
-                    | Inst::LoadByteU(dst, _)
-                    | Inst::JumpAndLink(dst, _) => {
+                    | Inst::LoadByteU(dst, _) => {
                         if dst.arch != ArchReg::Zero {
                             self.reg_file.set_phys_active(dst.phys, result.val);
                         }
@@ -401,14 +448,49 @@ impl OutOfOrder {
                         let taken = result.val == 1;
                         let predicted_taken = self.reg_file.was_predicted_taken(tag);
 
-                        if let Some(next_pc) =
-                            self.reg_file.end_predict(tag, taken, predicted_taken)
-                        {
+                        if let Some(next_pc) = self.reg_file.end_predict_direct(
+                            tag,
+                            taken,
+                            predicted_taken,
+                            &mut self.branch_predictor,
+                        ) {
                             // Flush
-                            self.stats.mispredicts += 1;
+                            self.stats.direct_mispredicts += 1;
                             self.kill_tags_after(tag);
                             next_fetch = Some(next_pc);
                         }
+                    }
+                    Inst::JumpAndLink(dst, _) => {
+                        let inst_pc = self.pc_map.remove(&tag).unwrap();
+
+                        if dst.arch != ArchReg::Zero {
+                            self.reg_file
+                                .set_phys_active(dst.phys, (inst_pc + INST_SIZE).0);
+                        }
+                    }
+                    Inst::JumpAndLinkRegister(dst, _, _) => {
+                        let (predicted_pc, inst_pc) = self.reg_file.predicted_addr(tag);
+
+                        if dst.arch != ArchReg::Zero {
+                            self.reg_file
+                                .set_phys_active(dst.phys, (inst_pc + INST_SIZE).0);
+                        }
+
+                        let actual_pc = AbsPc(result.val);
+                        self.reg_file.end_predict_indirect(
+                            tag,
+                            actual_pc,
+                            predicted_pc,
+                            &mut self.branch_predictor,
+                        );
+                        if predicted_pc
+                            .map(|predicted_pc| actual_pc != predicted_pc)
+                            .unwrap_or(false)
+                        {
+                            self.stats.indirect_mispredicts += 1;
+                            self.kill_tags_after(tag);
+                        }
+                        next_fetch = Some(actual_pc);
                     }
                     Inst::StoreWord(_, _)
                     | Inst::StoreHalfWord(_, _)
@@ -458,6 +540,7 @@ impl OutOfOrder {
                 | Inst::ShiftLeftLogicalImm(dst, _, _)
                 | Inst::SetLessThanImmU(dst, _, _)
                 | Inst::JumpAndLink(dst, _)
+                | Inst::JumpAndLinkRegister(dst, _, _)
                 | Inst::LoadByteU(dst, _)
                 | Inst::LoadWord(dst, _) => {
                     if dst != ArchReg::Zero {
@@ -488,6 +571,8 @@ impl OutOfOrder {
         for eu in &mut self.execution_units {
             eu.kill_tags_after(tag);
         }
+
+        self.pc_map.retain(|t, _| *t <= tag);
 
         self.reservation_station.kill_tags_after(tag);
         self.lsq.kill_tags_after(tag);

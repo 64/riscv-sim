@@ -1,4 +1,8 @@
-use crate::{cpu::Stats, inst::Tag, util::Addr};
+use crate::{
+    cpu::Stats,
+    inst::Tag,
+    util::{Addr, CacheCapacity},
+};
 use associative_cache::*;
 
 const L1_CAPACITY_BYTES: usize = 16_000;
@@ -192,13 +196,6 @@ impl MainMemory {
 
         self.mem[a..a + 4].copy_from_slice(&val.to_le_bytes())
     }
-}
-
-#[derive(Debug)]
-struct CacheCapacity<const BYTES: usize>;
-
-impl<const BYTES: usize> Capacity for CacheCapacity<{ BYTES }> {
-    const CAPACITY: usize = BYTES / 64;
 }
 
 type CacheLevel<const BYTES: usize> = AssociativeCache<

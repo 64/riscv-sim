@@ -6,6 +6,7 @@ use crate::{
 
 use std::{
     fmt::{self, Debug},
+    ops::{Add, AddAssign, Sub},
     str::FromStr,
 };
 use strum::{self, EnumIter, EnumString};
@@ -16,7 +17,7 @@ pub struct Imm(pub u32);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Label(pub String);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Default, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct AbsPc(pub u32);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -565,6 +566,28 @@ impl From<usize> for PhysReg {
 impl From<PhysReg> for usize {
     fn from(r: PhysReg) -> Self {
         r.0.try_into().expect("could not convert PhysReg to usize")
+    }
+}
+
+impl Add<u32> for AbsPc {
+    type Output = AbsPc;
+
+    fn add(self, other: u32) -> AbsPc {
+        AbsPc(self.0 + other)
+    }
+}
+
+impl AddAssign<u32> for AbsPc {
+    fn add_assign(&mut self, rhs: u32) {
+        *self = *self + rhs
+    }
+}
+
+impl Sub<u32> for AbsPc {
+    type Output = AbsPc;
+
+    fn sub(self, other: u32) -> AbsPc {
+        AbsPc(self.0 - other)
     }
 }
 

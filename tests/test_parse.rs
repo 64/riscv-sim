@@ -26,8 +26,8 @@ fn check_labels() {
         .expect("failed to parse asm/label.asm");
 
     let mut test = HashMap::new();
-    test.insert(Label("foo".to_owned()), AbsPc::from(1));
-    test.insert(Label(".bar".to_owned()), AbsPc::from(3));
-    test.insert(Label("baz5".to_owned()), AbsPc::from(4));
+    test.insert(Label("foo".to_owned()), AbsPc::from(4));
+    test.insert(Label(".bar".to_owned()), AbsPc::from(12));
+    test.insert(Label("baz5".to_owned()), AbsPc::from(16));
     assert_eq!(prog.labels, test);
 }
