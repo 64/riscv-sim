@@ -1,5 +1,5 @@
 use aca::{
-    inst::{Label, Pc},
+    inst::{AbsPc, Label},
     program::Program,
 };
 use hashbrown::HashMap;
@@ -26,8 +26,8 @@ fn check_labels() {
         .expect("failed to parse asm/label.asm");
 
     let mut test = HashMap::new();
-    test.insert(Label("foo".to_owned()), Pc::from(1));
-    test.insert(Label(".bar".to_owned()), Pc::from(3));
-    test.insert(Label("baz5".to_owned()), Pc::from(4));
+    test.insert(Label("foo".to_owned()), AbsPc::from(1));
+    test.insert(Label(".bar".to_owned()), AbsPc::from(3));
+    test.insert(Label("baz5".to_owned()), AbsPc::from(4));
     assert_eq!(prog.labels, test);
 }

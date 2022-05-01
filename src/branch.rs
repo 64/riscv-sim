@@ -37,5 +37,11 @@ impl BranchPredictor {
     }
 
     #[allow(dead_code)]
-    pub fn update_prediction(&mut self, _pc: u32, _target: u32, _taken: bool) { todo!() }
+    pub fn update_prediction(&mut self, _pc: u32, _target: u32, _taken: bool) {
+        todo!()
+    }
+
+    pub fn predict_indirect(&self, _pc: u32) -> Option<u32> {
+        None
+    }
 }

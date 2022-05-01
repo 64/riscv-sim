@@ -25,7 +25,11 @@ impl ReservationStation {
 
     pub fn insert(&mut self, tag: Tag, inst: RenamedInst) {
         debug_assert!(!self.is_full());
-        debug_assert!(!self.waiting.iter().any(|(t, _)| *t == tag), "inst {:?} already in RS", tag);
+        debug_assert!(
+            !self.waiting.iter().any(|(t, _)| *t == tag),
+            "inst {:?} already in RS",
+            tag
+        );
         // debug_assert!(!self.ready.iter().any(|(t, _)| *t == tag));
         self.waiting.push((tag, inst));
     }

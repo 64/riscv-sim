@@ -2,7 +2,7 @@ use crate::{
     branch::BranchPredictor,
     cpu::{Cpu, ExecResult, Stats},
     execution_unit::{EuType, ExecutionUnit},
-    inst::{ArchReg, ExecutedInst, Inst, RenamedInst, Tag, Tagged},
+    inst::{ArchReg, ExecutedInst, Inst, RenamedInst, Tag, Tagged, INST_SIZE},
     lsq::LoadStoreQueue,
     mem::{MainMemory, MemoryHierarchy},
     program::Program,
@@ -193,7 +193,7 @@ impl OutOfOrder {
             | Inst::BranchIfLess(_, _, tgt)
             | Inst::BranchIfGreaterEqual(_, _, tgt) => {
                 let taken_pc = u32::from(*tgt);
-                let not_taken_pc = pc + 1;
+                let not_taken_pc = pc + INST_SIZE;
                 let predict_taken = self.branch_predictor.predict_taken(pc, taken_pc);
 
                 self.reg_file
@@ -208,7 +208,7 @@ impl OutOfOrder {
             Inst::JumpAndLink(_, tgt) => u32::from(*tgt),
             Inst::JumpAndLinkRegister(_, _, _) => unimplemented!("jalr"),
             // Inst::Jump(tgt) => u32::from(*tgt),
-            _ => pc + 1,
+            _ => pc + INST_SIZE,
         };
 
         (Tagged { inst, tag }, next_pc)
@@ -468,7 +468,9 @@ impl OutOfOrder {
                         self.lsq.release_load(tag);
                     }
                 }
-                Inst::StoreByte(_, _) | Inst::StoreWord(_, _) => self.lsq.submit_store(tag, &self.reg_file, &mut self.mem),
+                Inst::StoreByte(_, _) | Inst::StoreWord(_, _) => {
+                    self.lsq.submit_store(tag, &self.reg_file, &mut self.mem)
+                }
                 Inst::BranchIfEqual(_, _, _)
                 | Inst::BranchIfLess(_, _, _)
                 | Inst::BranchIfNotEqual(_, _, _)

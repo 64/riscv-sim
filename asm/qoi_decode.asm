@@ -180,7 +180,6 @@ decode:
         li      a0,1000
         sw      ra,28(sp)
         call    qoi_decode
-qoi_decode_ret:
         lw      ra,28(sp)
         addi    sp,sp,32
 		j .end
@@ -268,7 +267,6 @@ qoi_decode:
         addi    s3,s3,-8
         mul     s1,a5,s2
         call    q_memset
-q_memset_ret:
         ble     s1,zero,.L17
         li      t2,-65536
         li      t0,-16711680
@@ -325,8 +323,7 @@ q_memset_ret:
         lw      s9,260(sp)
         lw      s10,256(sp)
         addi    sp,sp,304
-        ; jr      ra
-		j qoi_decode_ret
+        jr      ra
 .L7:
         bge     t1,s3,.L8
         add     a2,s0,t1
@@ -349,8 +346,7 @@ q_memset_ret:
         j       .L17
 .L36:
         li      a0,0
-        ; ret
-		j qoi_decode_ret
+        ret
 .L43:
         addi    a5,t1,3
         add     a3,s0,a3
@@ -450,8 +446,7 @@ q_memset:
         add     a2,a0,a2
         sb      a1,0(a2)
 .L48:
-        ; ret
-		j q_memset_ret
+        ret
 
 .end:
 		nop

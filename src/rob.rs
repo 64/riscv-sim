@@ -33,7 +33,10 @@ impl ReorderBuffer {
     }
 
     pub fn last_is_halt(&self) -> bool {
-        self.rob.back().map(|ent| ent.inst == Inst::Halt).unwrap_or(false)
+        self.rob
+            .back()
+            .map(|ent| ent.inst == Inst::Halt)
+            .unwrap_or(false)
     }
 
     #[must_use]

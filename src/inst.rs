@@ -17,13 +17,15 @@ pub struct Imm(pub u32);
 pub struct Label(pub String);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Pc(pub u32);
+pub struct AbsPc(pub u32);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct MemRef<RegType: Debug + Clone = ArchReg> {
     pub base: RegType,
     pub offset: Imm,
 }
+
+pub const INST_SIZE: u32 = 4;
 
 // https://en.wikichip.org/wiki/risc-v/registers
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumString, EnumIter)]
@@ -67,7 +69,7 @@ pub enum ArchReg {
 pub enum Inst<
     SrcReg: Debug + Clone = ArchReg,
     DstReg: Debug + Clone = ArchReg,
-    JumpType: Debug + Clone = Pc,
+    JumpType: Debug + Clone = AbsPc,
 > {
     LoadByte(DstReg, MemRef<SrcReg>),
     LoadByteU(DstReg, MemRef<SrcReg>),
@@ -566,23 +568,23 @@ impl From<PhysReg> for usize {
     }
 }
 
-impl From<Pc> for u32 {
-    fn from(pc: Pc) -> Self {
+impl From<AbsPc> for u32 {
+    fn from(pc: AbsPc) -> Self {
         pc.0
     }
 }
 
-impl From<u32> for Pc {
+impl From<u32> for AbsPc {
     fn from(pc: u32) -> Self {
-        Pc(pc)
+        AbsPc(pc)
     }
 }
 
-impl TryFrom<usize> for Pc {
+impl TryFrom<usize> for AbsPc {
     type Error = <u32 as TryFrom<usize>>::Error;
 
     fn try_from(pc: usize) -> Result<Self, Self::Error> {
-        Ok(Pc(pc.try_into()?))
+        Ok(AbsPc(pc.try_into()?))
     }
 }
 

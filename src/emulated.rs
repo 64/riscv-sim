@@ -1,6 +1,6 @@
 use crate::{
     cpu::{Cpu, CpuState, ExecResult, Stats},
-    inst::Inst,
+    inst::{Inst, INST_SIZE},
     mem::MainMemory,
     program::Program,
     regs::RegSet,
@@ -138,16 +138,17 @@ impl Emulated {
                 self.regs.set(dst, u32::from_le_bytes(val.to_le_bytes()));
             }
             Inst::JumpAndLink(dst, tgt) => {
-                self.regs.set(dst, self.pc + 1);
+                self.regs.set(dst, self.pc + INST_SIZE);
                 self.pc = tgt.into();
                 advance_pc = false;
             }
-            Inst::JumpAndLinkRegister(_dst, _src, _off) => {
-                // self.regs.set(dst, self.pc + 1);
-                // // TODO: we prob should sign extend the off value in the assembler
-                // self.pc = self.regs.get(src).wrapping_add(off.0);
-                // advance_pc = false;
-                unimplemented!("jalr");
+            Inst::JumpAndLinkRegister(dst, src, off) => {
+                assert_eq!(off.0, 0);
+
+                self.regs.set(dst, self.pc + INST_SIZE);
+                // TODO: we prob should sign extend the off value in the assembler
+                self.pc = self.regs.get(src).wrapping_add(off.0);
+                advance_pc = false;
             }
             Inst::BranchIfEqual(src0, src1, tgt) => {
                 let a = self.regs.get(src0);
@@ -191,7 +192,7 @@ impl Emulated {
         }
 
         if advance_pc {
-            self.pc += 1;
+            self.pc += INST_SIZE;
         }
 
         self.stats.insts_retired += 1;

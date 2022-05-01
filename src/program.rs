@@ -1,11 +1,11 @@
-use crate::inst::{Inst, Label, LabeledInst, Pc};
+use crate::inst::{AbsPc, Inst, Label, LabeledInst, INST_SIZE};
 use hashbrown::HashMap;
 use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub struct Program {
     pub insts: Vec<Inst>,
-    pub labels: HashMap<Label, Pc>,
+    pub labels: HashMap<Label, AbsPc>,
 }
 
 impl FromStr for Program {
@@ -25,10 +25,11 @@ impl FromStr for Program {
 
             // Line numbers start at 1
             let i = i + 1;
+            let abs_pc = AbsPc(INST_SIZE * u32::try_from(insts.len()).unwrap());
 
             if line.ends_with(':') {
                 match Label::from_str(&line[0..line.len() - 1]) {
-                    Ok(label) => labels.insert(label, insts.len().try_into().unwrap()),
+                    Ok(label) => labels.insert(label, abs_pc),
                     Err(e) => return Err(format!("error parsing label on line {i}: {e}")),
                 };
             } else {
@@ -57,6 +58,7 @@ impl FromStr for Program {
 
 impl Program {
     pub fn fetch(&self, ip: u32) -> Option<&Inst> {
-        self.insts.get(usize::try_from(ip).unwrap())
+        debug_assert_eq!(ip % 4, 0);
+        self.insts.get(usize::try_from(ip / 4).unwrap())
     }
 }

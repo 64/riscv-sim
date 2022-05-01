@@ -123,8 +123,8 @@ mod t {
 
 #[cfg(test)]
 mod cosim {
-    use aca::regs::RegSet;
     use super::*;
+    use aca::regs::RegSet;
 
     fn qoi_decode<C: Cpu>(path: &str) -> MainMemory {
         let mut mem = MainMemory::new();

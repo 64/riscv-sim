@@ -1,6 +1,11 @@
 use std::{fmt, time::Instant};
 
-use crate::{mem::MainMemory, program::Program, regs::RegSet, execution_unit::{ExecutionUnit, EuType}};
+use crate::{
+    execution_unit::{EuType, ExecutionUnit},
+    mem::MainMemory,
+    program::Program,
+    regs::RegSet,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CpuState {
@@ -59,7 +64,8 @@ impl Default for Stats {
 impl Stats {
     pub fn calculate_util(mut self, eus: &[ExecutionUnit]) -> Self {
         for eu in eus {
-            self.eu_util.push((eu.eu_type, eu.utilisation as f32 / self.cycles_taken as f32));
+            self.eu_util
+                .push((eu.eu_type, eu.utilisation as f32 / self.cycles_taken as f32));
         }
 
         self
@@ -129,7 +135,12 @@ impl fmt::Display for ExecResult {
             writeln!(f, "          EU utilisation:")?;
             for (eu_type, util) in &self.stats.eu_util {
                 if *eu_type != EuType::Special {
-                    writeln!(f, "{:>23} = {:>2.0}%", format!("{:?}", eu_type), util * 100.0)?;
+                    writeln!(
+                        f,
+                        "{:>23} = {:>2.0}%",
+                        format!("{:?}", eu_type),
+                        util * 100.0
+                    )?;
                 }
             }
         }
