@@ -125,10 +125,12 @@ impl fmt::Display for ExecResult {
             self.stats.start.elapsed().as_secs_f32()
         )?;
 
-        writeln!(f, "          EU utilisation:")?;
-        for (eu_type, util) in &self.stats.eu_util {
-            if *eu_type != EuType::Special {
-                writeln!(f, "{:>23} = {:>2.0}%", format!("{:?}", eu_type), util * 100.0)?;
+        if self.stats.eu_util.len() > 0 {
+            writeln!(f, "          EU utilisation:")?;
+            for (eu_type, util) in &self.stats.eu_util {
+                if *eu_type != EuType::Special {
+                    writeln!(f, "{:>23} = {:>2.0}%", format!("{:?}", eu_type), util * 100.0)?;
+                }
             }
         }
 

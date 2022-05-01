@@ -116,7 +116,7 @@ impl Cpu for OutOfOrder {
             self.stage_execute(&pipe);
 
             if commit.should_halt {
-                assert!(self.reg_file.is_prrt_empty());
+                // assert!(self.reg_file.is_prrt_empty());
 
                 return ExecResult {
                     regs: self.reg_file.get_reg_set(),
@@ -177,7 +177,7 @@ impl OutOfOrder {
         // dbg!(&self.reg_file);
         // dbg!(&self.reservation_station);
         // dbg!(&self.rob);
-        dbg!(&self.execution_units);
+        // dbg!(&self.execution_units);
         dbg!(pipe);
         // dbg!(self.stats.cycles_taken);
     }
@@ -205,7 +205,9 @@ impl OutOfOrder {
                     not_taken_pc
                 }
             }
-            Inst::Jump(tgt) => u32::from(*tgt),
+            Inst::JumpAndLink(_, tgt) => u32::from(*tgt),
+            Inst::JumpAndLinkRegister(_, _, _) => unimplemented!("jalr"),
+            // Inst::Jump(tgt) => u32::from(*tgt),
             _ => pc + 1,
         };
 
@@ -217,7 +219,9 @@ impl OutOfOrder {
         let mut next_pcs = vec![*pipe.fetch_decode.next_pcs.last().unwrap()];
 
         for i in 0..PIPE_WIDTH {
-            if self.rob.last_is_halt() { break; }
+            if self.rob.last_is_halt() {
+                break;
+            }
 
             let tag = Tag::from(PIPE_WIDTH * self.stats.cycles_taken + i);
 
@@ -257,7 +261,10 @@ impl OutOfOrder {
             None
         };
 
-        stages::wide::Rename { insts, next_fetch_decode }
+        stages::wide::Rename {
+            insts,
+            next_fetch_decode,
+        }
     }
 
     fn rename_one(&mut self, inst: &Tagged<Inst>) -> stages::narrow::Rename {
@@ -367,19 +374,28 @@ impl OutOfOrder {
 
                 match &inst {
                     Inst::Add(dst, _, _)
+                    | Inst::And(dst, _, _)
+                    | Inst::Or(dst, _, _)
                     | Inst::Sub(dst, _, _)
                     | Inst::Mul(dst, _, _)
                     | Inst::Rem(dst, _, _)
+                    | Inst::DivU(dst, _, _)
                     | Inst::AddImm(dst, _, _)
                     | Inst::AndImm(dst, _, _)
                     | Inst::SetLessThanImmU(dst, _, _)
                     | Inst::ShiftLeftLogicalImm(dst, _, _)
-                    | Inst::LoadWord(dst, _) => {
+                    | Inst::ShiftRightArithImm(dst, _, _)
+                    | Inst::LoadWord(dst, _)
+                    | Inst::LoadHalfWord(dst, _)
+                    | Inst::LoadByte(dst, _)
+                    | Inst::LoadByteU(dst, _)
+                    | Inst::JumpAndLink(dst, _) => {
                         if dst.arch != ArchReg::Zero {
                             self.reg_file.set_phys_active(dst.phys, result.val);
                         }
                     }
                     Inst::BranchIfEqual(_, _, _)
+                    | Inst::BranchIfLess(_, _, _)
                     | Inst::BranchIfNotEqual(_, _, _)
                     | Inst::BranchIfGreaterEqual(_, _, _) => {
                         let taken = result.val == 1;
@@ -394,17 +410,26 @@ impl OutOfOrder {
                             next_fetch = Some(next_pc);
                         }
                     }
-                    Inst::Jump(_) | Inst::StoreWord(_, _) | Inst::Halt => (),
+                    Inst::StoreWord(_, _)
+                    | Inst::StoreHalfWord(_, _)
+                    | Inst::StoreByte(_, _)
+                    | Inst::Halt => (),
                     _ => unimplemented!("{:?}", inst),
-                }
+                };
 
                 self.rob.mark_complete(tag);
 
-                return stages::narrow::Writeback { inst: Some(Tagged { tag, inst }), next_fetch };
+                return stages::narrow::Writeback {
+                    inst: Some(Tagged { tag, inst }),
+                    next_fetch,
+                };
             }
         }
 
-        stages::narrow::Writeback { inst: None, next_fetch: None }
+        stages::narrow::Writeback {
+            inst: None,
+            next_fetch: None,
+        }
     }
 
     // Commit instructions from the ROB to architectural state.
@@ -422,13 +447,18 @@ impl OutOfOrder {
 
             match inst {
                 Inst::Add(dst, _, _)
+                | Inst::And(dst, _, _)
+                | Inst::Or(dst, _, _)
                 | Inst::Sub(dst, _, _)
                 | Inst::Mul(dst, _, _)
                 | Inst::Rem(dst, _, _)
+                | Inst::DivU(dst, _, _)
                 | Inst::AddImm(dst, _, _)
                 | Inst::AndImm(dst, _, _)
                 | Inst::ShiftLeftLogicalImm(dst, _, _)
                 | Inst::SetLessThanImmU(dst, _, _)
+                | Inst::JumpAndLink(dst, _)
+                | Inst::LoadByteU(dst, _)
                 | Inst::LoadWord(dst, _) => {
                     if dst != ArchReg::Zero {
                         self.reg_file.release_phys(tag);
@@ -438,9 +468,9 @@ impl OutOfOrder {
                         self.lsq.release_load(tag);
                     }
                 }
-                Inst::StoreWord(_, _) => self.lsq.submit_store(tag, &self.reg_file, &mut self.mem),
-                Inst::Jump(_)
-                | Inst::BranchIfEqual(_, _, _)
+                Inst::StoreByte(_, _) | Inst::StoreWord(_, _) => self.lsq.submit_store(tag, &self.reg_file, &mut self.mem),
+                Inst::BranchIfEqual(_, _, _)
+                | Inst::BranchIfLess(_, _, _)
                 | Inst::BranchIfNotEqual(_, _, _)
                 | Inst::BranchIfGreaterEqual(_, _, _) => (),
                 _ => unimplemented!("{:?}", inst),

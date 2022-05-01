@@ -61,6 +61,10 @@ impl Emulated {
                 let val = self.mem.readb(self.regs.ref_to_addr(src));
                 self.regs.set(dst, val);
             }
+            Inst::LoadByteU(dst, src) => {
+                let val = self.mem.readbu(self.regs.ref_to_addr(src));
+                self.regs.set(dst, val);
+            }
             Inst::LoadHalfWord(dst, src) => {
                 let val = self.mem.readh(self.regs.ref_to_addr(src));
                 self.regs.set(dst, val);
@@ -96,6 +100,16 @@ impl Emulated {
                 let b = imm.0;
                 self.regs.set(dst, a.wrapping_add(b));
             }
+            Inst::Or(dst, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                self.regs.set(dst, a | b);
+            }
+            Inst::And(dst, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                self.regs.set(dst, a & b);
+            }
             Inst::AndImm(dst, src, imm) => {
                 let a = self.regs.get(src);
                 let b = imm.0;
@@ -111,20 +125,29 @@ impl Emulated {
                 let b = self.regs.get(src1);
                 self.regs.set(dst, a.wrapping_mul(b));
             }
-            Inst::Rem(dst, src0, src1) => {
+            Inst::DivU(dst, src0, src1) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
-                let val = if b == 0 { a } else { a % b };
+                let val = if b == 0 { u32::MAX } else { a / b };
                 self.regs.set(dst, val);
             }
-            Inst::Jump(tgt) => {
-                self.pc = tgt.into();
-                advance_pc = false;
+            Inst::Rem(dst, src0, src1) => {
+                let a = i32::from_le_bytes(self.regs.get(src0).to_le_bytes());
+                let b = i32::from_le_bytes(self.regs.get(src1).to_le_bytes());
+                let val = if b == 0 { a } else { a % b };
+                self.regs.set(dst, u32::from_le_bytes(val.to_le_bytes()));
             }
             Inst::JumpAndLink(dst, tgt) => {
                 self.regs.set(dst, self.pc + 1);
                 self.pc = tgt.into();
                 advance_pc = false;
+            }
+            Inst::JumpAndLinkRegister(_dst, _src, _off) => {
+                // self.regs.set(dst, self.pc + 1);
+                // // TODO: we prob should sign extend the off value in the assembler
+                // self.pc = self.regs.get(src).wrapping_add(off.0);
+                // advance_pc = false;
+                unimplemented!("jalr");
             }
             Inst::BranchIfEqual(src0, src1, tgt) => {
                 let a = self.regs.get(src0);
@@ -164,6 +187,7 @@ impl Emulated {
                 self.regs.set(dst, val);
             }
             Inst::Halt => unreachable!(),
+            _ => unimplemented!("{:?}", *next_inst),
         }
 
         if advance_pc {

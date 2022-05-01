@@ -49,7 +49,10 @@ impl ExecutionUnit {
     }
 
     pub fn was_utilised(&self) -> bool {
-        self.executing_insts.last().map(|e| e.1 == 0).unwrap_or(false)
+        self.executing_insts
+            .last()
+            .map(|e| e.1 == 0)
+            .unwrap_or(false)
     }
 
     pub fn advance(&mut self, mem: &mut MemoryHierarchy, stats: &mut Stats) {
@@ -93,7 +96,8 @@ impl ExecutionUnit {
     }
 
     pub fn kill_tags_after(&mut self, tag: Tag) {
-        self.executing_insts.retain(|(Tagged { tag: t, .. }, _)| *t <= tag);
+        self.executing_insts
+            .retain(|(Tagged { tag: t, .. }, _)| *t <= tag);
 
         if let Some((tagged, _)) = &self.completed_inst {
             if tagged.tag > tag {
@@ -105,6 +109,8 @@ impl ExecutionUnit {
     fn compute_result(inst: &ReadyInst, mem: &mut MemoryHierarchy) -> EuResult {
         let val = match inst {
             Inst::Add(_, src0, src1) => src0.wrapping_add(*src1),
+            Inst::And(_, src0, src1) => src0 & *src1,
+            Inst::Or(_, src0, src1) => src0 | *src1,
             Inst::Sub(_, src0, src1) => src0.wrapping_sub(*src1),
             Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
             Inst::AndImm(_, src, imm) => src & imm.0,
@@ -116,12 +122,32 @@ impl ExecutionUnit {
                     *src0 % *src1
                 }
             }
+            Inst::DivU(_, src0, src1) => {
+                if *src1 == 0 {
+                    u32::MAX
+                } else {
+                    *src0 / *src1
+                }
+            }
             Inst::ShiftLeftLogicalImm(_, src, imm) => src.wrapping_shl(imm.0),
             Inst::SetLessThanImmU(_, src, imm) => (src < &imm.0).into(),
+            Inst::JumpAndLink(_, imm) => imm.0,
             Inst::BranchIfEqual(src0, src1, _) => (src0 == src1).into(),
             Inst::BranchIfNotEqual(src0, src1, _) => (src0 != src1).into(),
-            Inst::BranchIfGreaterEqual(src0, src1, _) => (src0 >= src1).into(),
-            Inst::Jump(_) | Inst::Halt => 0,
+            Inst::BranchIfGreaterEqualU(src0, src1, _) => (src0 >= src1).into(),
+            Inst::BranchIfGreaterEqual(src0, src1, _) => {
+                let a = i32::from_le_bytes(src0.to_le_bytes());
+                let b = i32::from_le_bytes(src1.to_le_bytes());
+                (a >= b).into()
+            }
+            Inst::BranchIfLess(src0, src1, _) => {
+                let a = i32::from_le_bytes(src0.to_le_bytes());
+                let b = i32::from_le_bytes(src1.to_le_bytes());
+                (a < b).into()
+            }
+            Inst::BranchIfLessU(src0, src1, _) => (src0 < src1).into(),
+            Inst::Halt => 0,
+            Inst::LoadByteU(_, src) => mem.main.readbu(src.compute_addr()),
             Inst::LoadWord(_, src) => mem.main.readw(src.compute_addr()),
             x if x.is_store() => 0, // Stores are handled by LSQ upon retire.
             _ => unimplemented!("{:?}", inst),

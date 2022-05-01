@@ -46,7 +46,9 @@ impl FromStr for Program {
         // Do another pass to fixup the labels.
         let insts = insts
             .into_iter()
-            .map(|inst| inst.map_jumps(|tgt| labels[&tgt]))
+            .map(|inst| {
+                inst.map_jumps(|tgt| *labels.get(&tgt).expect(&format!("unknown label {:?}", tgt)))
+            })
             .collect();
 
         Ok(Program { insts, labels })

@@ -1,6 +1,6 @@
 use aca::{
     cpu::Cpu, emulated::Emulated, inst::ArchReg, mem::MainMemory, out_of_order::OutOfOrder,
-    parse_and_exec, pipelined::Pipelined, util::Addr,
+    parse_and_exec, util::Addr,
 };
 
 #[generic_tests::define]
@@ -117,9 +117,35 @@ mod t {
     #[instantiate_tests(<Emulated>)]
     mod emulated {}
 
-    #[instantiate_tests(<Pipelined>)]
-    mod pipelined {}
-
     #[instantiate_tests(<OutOfOrder>)]
     mod out_of_order {}
+}
+
+#[cfg(test)]
+mod cosim {
+    use aca::regs::RegSet;
+    use super::*;
+
+    fn qoi_decode<C: Cpu>(path: &str) -> MainMemory {
+        let mut mem = MainMemory::new();
+        let load_addr = 1000;
+        let data = std::fs::read(path).expect("could not open file");
+        mem.copy_from_slice(&data, Addr(load_addr));
+
+        parse_and_exec::<C>(
+            "qoi_decode",
+            RegSet::from([(ArchReg::A0, load_addr), (ArchReg::A1, data.len() as u32)]),
+            mem,
+        )
+        .mem
+    }
+
+    #[test]
+    fn test_qoi_decode() {
+        // let path = "data/riscv-300x300.qoi";
+        let path = "data/test-8x8.qoi";
+        let a = qoi_decode::<Emulated>(path);
+        let b = qoi_decode::<OutOfOrder>(path);
+        assert!(a == b, "qoi decode results differ!");
+    }
 }

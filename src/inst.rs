@@ -49,6 +49,16 @@ pub enum ArchReg {
     A7,
     S0,
     S1,
+    S2,
+    S3,
+    S4,
+    S5,
+    S6,
+    S7,
+    S8,
+    S9,
+    S10,
+    S11,
 }
 
 // https://mark.theis.site/riscv/
@@ -60,24 +70,31 @@ pub enum Inst<
     JumpType: Debug + Clone = Pc,
 > {
     LoadByte(DstReg, MemRef<SrcReg>),
+    LoadByteU(DstReg, MemRef<SrcReg>),
     LoadHalfWord(DstReg, MemRef<SrcReg>),
     LoadWord(DstReg, MemRef<SrcReg>),
     StoreByte(SrcReg, MemRef<SrcReg>),
     StoreHalfWord(SrcReg, MemRef<SrcReg>),
     StoreWord(SrcReg, MemRef<SrcReg>),
     Add(DstReg, SrcReg, SrcReg),
-    Sub(DstReg, SrcReg, SrcReg),
     AddImm(DstReg, SrcReg, Imm),
+    Sub(DstReg, SrcReg, SrcReg),
+    Or(DstReg, SrcReg, SrcReg),
+    And(DstReg, SrcReg, SrcReg),
     AndImm(DstReg, SrcReg, Imm),
     ShiftLeftLogicalImm(DstReg, SrcReg, Imm),
+    ShiftRightArithImm(DstReg, SrcReg, Imm),
     Mul(DstReg, SrcReg, SrcReg),
     Rem(DstReg, SrcReg, SrcReg),
-    Jump(JumpType),
+    DivU(DstReg, SrcReg, SrcReg),
     JumpAndLink(DstReg, JumpType),
+    JumpAndLinkRegister(DstReg, SrcReg, Imm),
     BranchIfEqual(SrcReg, SrcReg, JumpType),
     BranchIfNotEqual(SrcReg, SrcReg, JumpType),
     BranchIfGreaterEqual(SrcReg, SrcReg, JumpType),
+    BranchIfGreaterEqualU(SrcReg, SrcReg, JumpType),
     BranchIfLess(SrcReg, SrcReg, JumpType),
+    BranchIfLessU(SrcReg, SrcReg, JumpType),
     SetLessThanImmU(DstReg, SrcReg, Imm),
     Halt, // Used internally when execution finishes.
 }
@@ -141,32 +158,42 @@ impl FromStr for LabeledInst {
         #[rustfmt::skip]
         let inst = match op.to_lowercase().as_str() {
             "lb" => LabeledInst::LoadByte(reg_arg(0)?, mem_arg(1)?),
+            "lbu" => LabeledInst::LoadByteU(reg_arg(0)?, mem_arg(1)?),
             "lh" => LabeledInst::LoadHalfWord(reg_arg(0)?, mem_arg(1)?),
             "lw" => LabeledInst::LoadWord(reg_arg(0)?, mem_arg(1)?),
             "sb" => LabeledInst::StoreByte(reg_arg(0)?, mem_arg(1)?),
             "sh" => LabeledInst::StoreHalfWord(reg_arg(0)?, mem_arg(1)?),
             "sw" => LabeledInst::StoreWord(reg_arg(0)?, mem_arg(1)?),
             "add" => LabeledInst::Add(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
+            "addi" => LabeledInst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "sub" => LabeledInst::Sub(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "neg" => LabeledInst::Sub(reg_arg(0)?, ArchReg::Zero, reg_arg(1)?),
-            "addi" => LabeledInst::AddImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "and" => LabeledInst::And(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "andi" => LabeledInst::AndImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "or" => LabeledInst::Or(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "slli" => LabeledInst::ShiftLeftLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "mul" => LabeledInst::Mul(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "rem" => LabeledInst::Rem(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
+            "divu" => LabeledInst::DivU(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "li" => LabeledInst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
             "mv" => LabeledInst::AddImm(reg_arg(0)?, reg_arg(1)?, Imm(0)),
-            "j" => LabeledInst::Jump(label_arg(0)?),
+            "j" => LabeledInst::JumpAndLink(ArchReg::Zero, label_arg(0)?),
             "jal" => LabeledInst::JumpAndLink(reg_arg(0)?, label_arg(1)?),
+            "call" => LabeledInst::JumpAndLink(ArchReg::RA, label_arg(0)?),
+            "jr" => LabeledInst::JumpAndLinkRegister(ArchReg::Zero, reg_arg(0)?, Imm(0)),
+            "ret" => LabeledInst::JumpAndLinkRegister(ArchReg::Zero, ArchReg::RA, Imm(0)),
             "beq" => LabeledInst::BranchIfEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bne" => LabeledInst::BranchIfNotEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bge" => LabeledInst::BranchIfGreaterEqual(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "ble" => LabeledInst::BranchIfGreaterEqual(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
             "blt" => LabeledInst::BranchIfLess(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bgt" => LabeledInst::BranchIfLess(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
+            "bleu" => LabeledInst::BranchIfGreaterEqualU(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
+            "bgtu" => LabeledInst::BranchIfLessU(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
             "seqz" => LabeledInst::SetLessThanImmU(reg_arg(0)?, reg_arg(1)?, Imm(1)),
+            "srai" => LabeledInst::ShiftRightArithImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
+            "hlt" => LabeledInst::Halt,
             "nop" => LabeledInst::nop(),
-            "ret" => todo!(),
             _ => return Err(format!("unknown instruction: '{}'", op)),
         };
 
@@ -180,46 +207,14 @@ impl<J: Debug + Clone> Inst<ArchReg, ArchReg, J> {
     }
 }
 
-impl Inst {
-    pub fn writes_reg(&self, reg: ArchReg) -> bool {
-        if reg == ArchReg::Zero {
-            return false;
-        }
-
-        match self {
-            Inst::Add(dst, _, _)
-            | Inst::AddImm(dst, _, _)
-            | Inst::AndImm(dst, _, _)
-            | Inst::ShiftLeftLogicalImm(dst, _, _)
-            | Inst::Rem(dst, _, _)
-            | Inst::Mul(dst, _, _)
-            | Inst::Sub(dst, _, _)
-            | Inst::SetLessThanImmU(dst, _, _)
-            | Inst::LoadByte(dst, _)
-            | Inst::LoadHalfWord(dst, _)
-            | Inst::LoadWord(dst, _)
-            | Inst::JumpAndLink(dst, _) => *dst == reg,
-            Inst::BranchIfNotEqual(_, _, _)
-            | Inst::BranchIfEqual(_, _, _)
-            | Inst::BranchIfGreaterEqual(_, _, _)
-            | Inst::BranchIfLess(_, _, _)
-            | Inst::Jump(_)
-            | Inst::StoreByte(_, _)
-            | Inst::StoreHalfWord(_, _)
-            | Inst::StoreWord(_, _)
-            | Inst::Halt => false,
-        }
-    }
-}
-
 impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
     Inst<SrcReg, DstReg, JumpType>
 {
     pub fn is_branch(&self) -> bool {
         matches!(
             self,
-            Inst::Jump(_)
-                | Inst::JumpAndLink(_, _)
+            Inst::JumpAndLink(_, _)
+                | Inst::JumpAndLinkRegister(_, _, _)
                 | Inst::BranchIfNotEqual(_, _, _)
                 | Inst::BranchIfEqual(_, _, _)
                 | Inst::BranchIfLess(_, _, _)
@@ -234,7 +229,10 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
     pub fn is_load(&self) -> bool {
         matches!(
             self,
-            Inst::LoadByte(_, _) | Inst::LoadHalfWord(_, _) | Inst::LoadWord(_, _)
+            Inst::LoadByte(_, _)
+                | Inst::LoadByteU(_, _)
+                | Inst::LoadHalfWord(_, _)
+                | Inst::LoadWord(_, _)
         )
     }
 
@@ -247,21 +245,28 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
 
     pub fn eu_type(&self) -> EuType {
         match self {
-            Inst::Jump(_)
-            | Inst::JumpAndLink(_, _)
+            Inst::JumpAndLink(_, _)
+            | Inst::JumpAndLinkRegister(_, _, _)
             | Inst::BranchIfNotEqual(_, _, _)
             | Inst::BranchIfEqual(_, _, _)
             | Inst::BranchIfLess(_, _, _)
-            | Inst::BranchIfGreaterEqual(_, _, _) => EuType::Branch,
+            | Inst::BranchIfLessU(_, _, _)
+            | Inst::BranchIfGreaterEqual(_, _, _)
+            | Inst::BranchIfGreaterEqualU(_, _, _) => EuType::Branch,
             Inst::Add(_, _, _)
-            | Inst::Sub(_, _, _)
             | Inst::AddImm(_, _, _)
+            | Inst::Sub(_, _, _)
+            | Inst::Or(_, _, _)
+            | Inst::And(_, _, _)
             | Inst::AndImm(_, _, _)
             | Inst::ShiftLeftLogicalImm(_, _, _)
+            | Inst::ShiftRightArithImm(_, _, _)
             | Inst::SetLessThanImmU(_, _, _)
             | Inst::Mul(_, _, _)
+            | Inst::DivU(_, _, _)
             | Inst::Rem(_, _, _) => EuType::Alu,
             Inst::LoadByte(_, _)
+            | Inst::LoadByteU(_, _)
             | Inst::LoadHalfWord(_, _)
             | Inst::LoadWord(_, _)
             | Inst::StoreByte(_, _)
@@ -279,10 +284,12 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
             | Inst::Sub(_, _, _)
             | Inst::SetLessThanImmU(_, _, _)
             | Inst::AddImm(_, _, _)
+            | Inst::Or(_, _, _)
+            | Inst::And(_, _, _)
             | Inst::AndImm(_, _, _)
             | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
             Inst::Mul(_, _, _) => 2,
-            Inst::Rem(_, _, _) => 3,
+            Inst::Rem(_, _, _) | Inst::DivU(_, _, _) => 3,
             Inst::Halt => 1,
             _ => unimplemented!("{:?}", self),
         }
@@ -305,25 +312,32 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
     {
         Some(match self {
             Inst::Add(dst, src0, src1) => Inst::Add(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
-            Inst::Sub(dst, src0, src1) => Inst::Sub(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::AddImm(dst, src, imm) => Inst::AddImm(dst_fn(dst)?, src_fn(src)?, imm),
+            Inst::Sub(dst, src0, src1) => Inst::Sub(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
+            Inst::And(dst, src0, src1) => Inst::And(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::AndImm(dst, src, imm) => Inst::AndImm(dst_fn(dst)?, src_fn(src)?, imm),
+            Inst::Or(dst, src0, src1) => Inst::Or(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::ShiftLeftLogicalImm(dst, src, imm) => Inst::ShiftLeftLogicalImm(dst_fn(dst)?, src_fn(src)?, imm),
+            Inst::ShiftRightArithImm(dst, src, imm) => Inst::ShiftLeftLogicalImm(dst_fn(dst)?, src_fn(src)?, imm),
             Inst::SetLessThanImmU(dst, src, imm) => Inst::SetLessThanImmU(dst_fn(dst)?, src_fn(src)?, imm),
             Inst::Mul(dst, src0, src1) => Inst::Mul(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::Rem(dst, src0, src1) => Inst::Rem(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
+            Inst::DivU(dst, src0, src1) => Inst::DivU(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::LoadByte(dst, src) => Inst::LoadByte(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
+            Inst::LoadByteU(dst, src) => Inst::LoadByteU(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
             Inst::LoadHalfWord(dst, src) => Inst::LoadHalfWord(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
             Inst::LoadWord(dst, src) => Inst::LoadWord(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
             Inst::StoreByte(src, dst) => Inst::StoreByte(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
             Inst::StoreHalfWord(src, dst) => Inst::StoreHalfWord(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
             Inst::StoreWord(src, dst) => Inst::StoreWord(src_fn(src)?, MemRef { base: src_fn(dst.base)?, offset: dst.offset }),
             Inst::JumpAndLink(dst, label) => Inst::JumpAndLink(dst_fn(dst)?, jump_fn(label)?),
+            Inst::JumpAndLinkRegister(dst, src, imm) => Inst::JumpAndLinkRegister(dst_fn(dst)?, src_fn(src)?, imm),
             Inst::BranchIfNotEqual(src0, src1, label) => Inst::BranchIfNotEqual(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
             Inst::BranchIfEqual(src0, src1, label) => Inst::BranchIfEqual(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
             Inst::BranchIfGreaterEqual(src0, src1, label)=> Inst::BranchIfGreaterEqual(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
+            Inst::BranchIfGreaterEqualU(src0, src1, label)=> Inst::BranchIfGreaterEqual(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
             Inst::BranchIfLess(src0, src1, label)=> Inst::BranchIfLess(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
-            Inst::Jump(label) => Inst::Jump(jump_fn(label)?),
+            Inst::BranchIfLessU(src0, src1, label)=> Inst::BranchIfLess(src_fn(src0)?, src_fn(src1)?, jump_fn(label)?),
             Inst::Halt => Inst::Halt,
         })
     }
@@ -409,8 +423,14 @@ impl RenamedInst {
 impl ReadyInst {
     pub fn access_addr(&self) -> Addr {
         match self {
-            Inst::LoadWord(_, dst) | Inst::StoreWord(_, dst) => dst.compute_addr(),
-            _ => unimplemented!(),
+            Inst::LoadWord(_, dst)
+            | Inst::LoadHalfWord(_, dst)
+            | Inst::LoadByte(_, dst)
+            | Inst::LoadByteU(_, dst)
+            | Inst::StoreWord(_, dst)
+            | Inst::StoreHalfWord(_, dst)
+            | Inst::StoreByte(_, dst) => dst.compute_addr(),
+            _ => unimplemented!("{:?}", self),
         }
     }
 }

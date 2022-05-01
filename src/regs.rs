@@ -72,6 +72,7 @@ impl RegFile {
         rf
     }
 
+    #[allow(dead_code)]
     pub fn is_prrt_empty(&self) -> bool {
         self.prrt.is_empty()
     }
@@ -82,7 +83,8 @@ impl RegFile {
             .iter()
             .map(|(&k, &v)| match self.phys_rf.0[usize::from(v)] {
                 PrfEntry::Active(v) => (k, v),
-                _ => unreachable!(),
+                // _ => unreachable!(),
+                _ => (k, 0),
             })
             .collect();
         RegSet::from(map)

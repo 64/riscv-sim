@@ -6,7 +6,6 @@ mod inst;
 mod lsq;
 mod mem;
 mod out_of_order;
-mod pipelined;
 mod program;
 mod queue;
 mod regs;
@@ -14,7 +13,9 @@ mod reservation_station;
 mod rob;
 mod util;
 
-use crate::{cpu::Cpu, inst::ArchReg, mem::MainMemory, regs::RegSet};
+use std::path::PathBuf;
+
+use crate::{cpu::Cpu, inst::ArchReg, mem::MainMemory, regs::RegSet, util::Addr};
 
 fn main() {
     let file = std::env::args()
@@ -28,18 +29,35 @@ fn main() {
         .parse::<program::Program>()
         .expect("failed to parse program");
 
-    let a0 = std::env::args()
-        .nth(2)
-        .and_then(|x| x.parse::<u32>().ok())
-        .unwrap_or(0);
+    let mut mem = MainMemory::new();
+
+    let a0 = std::env::args().nth(2).unwrap_or("".to_string());
+
+    let a0 = if let Some(x) = a0.parse::<u32>().ok() {
+        x
+    } else if let Some(path) = a0.parse::<PathBuf>().ok() {
+        println!("Loading file: {}", path.display());
+
+        let load_addr = 1000;
+        let data = std::fs::read(path).expect("could not open file");
+        mem.copy_from_slice(&data, Addr(load_addr));
+        load_addr
+    } else {
+        0
+    };
+
     let a1 = std::env::args()
         .nth(3)
         .and_then(|x| x.parse::<u32>().ok())
         .unwrap_or(0);
     let initial_regs = RegSet::from([(ArchReg::A0, a0), (ArchReg::A1, a1)]);
 
-    // let res = emulated::Emulated::new(prog, initial_regs, MainMemory::new()).exec_all();
-    // let res = pipelined::Pipelined::new(prog, initial_regs, MainMemory::new()).exec_all();
-    let res = out_of_order::OutOfOrder::new(prog, initial_regs, MainMemory::new()).exec_all();
+    let res = emulated::Emulated::new(prog, initial_regs, mem).exec_all();
+    // let res = out_of_order::OutOfOrder::new(prog, initial_regs, mem).exec_all();
+
+    use std::io::Write;
+    let mut f = std::fs::File::create("/tmp/mem.txt").expect("Unable to create file");
+    writeln!(f, "{:#?}", res.mem).unwrap();
+
     println!("{res}");
 }

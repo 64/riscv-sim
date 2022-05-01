@@ -4,7 +4,7 @@ use associative_cache::*;
 const L1_CAPACITY_BYTES: usize = 16_000;
 const L2_CAPACITY_BYTES: usize = 32_000;
 const L3_CAPACITY_BYTES: usize = 128_000;
-const DRAM_CAPACITY_BYTES: usize = 256_000;
+const DRAM_CAPACITY_BYTES: usize = 1_024_000;
 
 pub const STACK_TOP: usize = DRAM_CAPACITY_BYTES - 2_000;
 
@@ -14,7 +14,7 @@ const L3_LATENCY: u64 = 40;
 const DRAM_LATENCY: u64 = 400;
 // const DRAM_LATENCY: u64 = 1;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MainMemory {
     mem: Vec<u8>,
 }
@@ -66,7 +66,7 @@ impl MemoryHierarchy {
                     // dbg!(tag);
                     // dbg!(p);
                     // TODO: WE should just implement load/store forwarding
-                    L1_LATENCY// + (p.end - p.current)
+                    L1_LATENCY // + (p.end - p.current)
                 } else if self.l1.get(&addr).is_some() {
                     L1_LATENCY
                 } else if self.l2.get(&addr).is_some() {
@@ -138,7 +138,17 @@ impl MainMemory {
         }
     }
 
+    pub fn copy_from_slice(&mut self, data: &[u8], start_addr: Addr) {
+        let start = start_addr.0 as usize;
+        self.mem[start..start + data.len()].copy_from_slice(data);
+    }
+
     pub fn readb(&self, addr: Addr) -> u32 {
+        let sx = i8::from_le_bytes([self.mem[addr.0 as usize]]) as i32;
+        u32::from_le_bytes(sx.to_le_bytes())
+    }
+
+    pub fn readbu(&self, addr: Addr) -> u32 {
         self.mem[addr.0 as usize] as u32
     }
 
@@ -146,7 +156,8 @@ impl MainMemory {
         let a = addr.0 as usize;
         assert!(a % 2 == 0);
 
-        u16::from_le_bytes([self.mem[a], self.mem[a + 1]]) as u32
+        let sx = i16::from_le_bytes([self.mem[a], self.mem[a + 1]]) as i32;
+        u32::from_le_bytes(sx.to_le_bytes())
     }
 
     pub fn readw(&self, addr: Addr) -> u32 {
@@ -162,19 +173,22 @@ impl MainMemory {
     }
 
     pub fn writeb(&mut self, addr: Addr, val: u32) {
+        // println!("WRITEb {} at {:?}", val, addr);
         self.mem[addr.0 as usize] = val.to_le_bytes()[0];
     }
 
     pub fn writeh(&mut self, addr: Addr, val: u32) {
+        // println!("WRITEh {} at {:?}", val, addr);
         let a = addr.0 as usize;
-        assert!(a % 2 == 0);
+        debug_assert!(a % 2 == 0);
 
         self.mem[a..a + 2].copy_from_slice(&val.to_le_bytes())
     }
 
     pub fn writew(&mut self, addr: Addr, val: u32) {
+        // println!("WRITEw {} at {:?}", val, addr);
         let a = addr.0 as usize;
-        assert!(a % 4 == 0);
+        debug_assert!(a % 4 == 0);
 
         self.mem[a..a + 4].copy_from_slice(&val.to_le_bytes())
     }

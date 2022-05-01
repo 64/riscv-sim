@@ -62,10 +62,13 @@ impl LoadStoreQueue {
             .get_ready(rf)
             .expect("store committed when not ready")
         {
+            Inst::StoreByte(val, dst) => {
+                mem.main.writeb(dst.compute_addr(), val);
+            }
             Inst::StoreWord(val, dst) => {
                 mem.main.writew(dst.compute_addr(), val);
             }
-            _ => unreachable!(),
+            _ => unimplemented!("{:?}", store.inst),
         }
     }
 
