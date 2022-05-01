@@ -17,8 +17,9 @@ type AliasTable = HashMap<ArchReg, PhysReg>;
 // See https://docs.boom-core.org/en/latest/sections/rename-stage.html#the-free-list
 #[derive(Debug, Clone, Default)]
 pub struct BranchInfo {
-    rat_cp: AliasTable,
-    alloc_list: Vec<PhysReg>,
+    // Options because we snapshot during rename (so that everything is in-order)
+    rat_cp: Option<AliasTable>,
+    alloc_list: Option<Vec<PhysReg>>,
     taken: bool,
     taken_pc: u32,
     not_taken_pc: u32,
@@ -71,6 +72,10 @@ impl RegFile {
         rf
     }
 
+    pub fn is_prrt_empty(&self) -> bool {
+        self.prrt.is_empty()
+    }
+
     pub fn get_reg_set(self) -> RegSet {
         let map: HashMap<ArchReg, u32> = self
             .rat
@@ -88,12 +93,11 @@ impl RegFile {
     }
 
     pub fn begin_predict(&mut self, branch: Tag, taken: bool, taken_pc: u32, not_taken_pc: u32) {
-        // Create snapshot of the RAT and note whether the branch was taken.
         self.branch_info.insert(
             branch,
             BranchInfo {
-                rat_cp: self.rat.clone(),
-                alloc_list: Vec::new(),
+                rat_cp: None,
+                alloc_list: None,
                 taken,
                 taken_pc,
                 not_taken_pc,
@@ -107,11 +111,24 @@ impl RegFile {
         // branch_predictor.update_prediction(/* ... */);
 
         if taken != predicted {
-            self.rat = branch_info.rat_cp;
+            let alloc_list = branch_info.alloc_list.unwrap();
+            self.rat = branch_info.rat_cp.unwrap();
 
-            for phys_reg in branch_info.alloc_list {
+            let num_removed = alloc_list.len();
+
+            for phys_reg in alloc_list {
                 self.phys_rf.0[usize::from(phys_reg)] = PrfEntry::Free;
-                self.prrt.pop_back();
+                self.prrt.pop_back().unwrap();
+            }
+
+            // self.branch_info.iter().for_each(|(&t, _)| debug_assert!(t >= tag));
+            self.branch_info.retain(|&t, _| t <= branch);
+
+            // Is this needed?
+            for bi in self.branch_info.values_mut() {
+                for _ in 0..num_removed {
+                    bi.alloc_list.as_mut().map(|al| al.pop().unwrap());
+                }
             }
 
             if taken {
@@ -125,8 +142,10 @@ impl RegFile {
     }
 
     pub fn kill_tags_after(&mut self, tag: Tag) {
-        // TODO: Is this needed?
-        self.branch_info.retain(|&t, _| t <= tag);
+        // // TODO: Is this needed?
+        self.branch_info
+            .iter()
+            .for_each(|(&t, _)| debug_assert!(t <= tag));
     }
 
     fn allocate_phys_internal(&mut self) -> Option<PhysReg> {
@@ -136,17 +155,19 @@ impl RegFile {
         Some(PhysReg::from(slot))
     }
 
-    pub fn allocate_phys(&mut self) -> Option<PhysReg> {
+    pub fn allocate_phys(&mut self, _tag: Tag) -> Option<PhysReg> {
         self.allocate_phys_internal().map(|slot| {
             for branch in self.branch_info.values_mut() {
-                branch.alloc_list.push(slot);
+                if let Some(al) = branch.alloc_list.as_mut() {
+                    al.push(slot)
+                }
             }
 
             slot
         })
     }
 
-    pub fn release_phys(&mut self) {
+    pub fn release_phys(&mut self, _tag: Tag) {
         let slot = self
             .prrt
             .pop_front()
@@ -184,7 +205,12 @@ impl RegFile {
         self.rat.insert(arch_reg, phys_reg);
     }
 
-    pub fn perform_rename(&mut self, inst: Inst) -> Option<RenamedInst> {
+    pub fn perform_rename(&mut self, tag: Tag, inst: Inst) -> Option<RenamedInst> {
+        if let Some(bi) = self.branch_info.get_mut(&tag) {
+            bi.rat_cp = Some(self.rat.clone());
+            bi.alloc_list = Some(Vec::new());
+        }
+
         // Have to do this in two separate steps to prevent borrowing issues.
         let renamed_inst = inst.map_src_regs(|src_reg| match src_reg {
             ArchReg::Zero => ValueOrReg::Value(0),
@@ -199,7 +225,7 @@ impl RegFile {
                         arch: ArchReg::Zero,
                         phys: PhysReg::none(),
                     })
-                } else if let Some(slot) = self.allocate_phys() {
+                } else if let Some(slot) = self.allocate_phys(tag) {
                     // Prepare the old PhysReg for reclaim.
                     let old_phys = self.get_alias(dst_reg);
                     self.prrt.push_back(old_phys);
@@ -229,7 +255,14 @@ impl fmt::Debug for PrfEntry {
 
 impl fmt::Debug for PhysFile {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_map().entries(self.0.iter().enumerate()).finish()
+        fmt.debug_map()
+            .entries(
+                self.0
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| **v != PrfEntry::Free),
+            )
+            .finish()
     }
 }
 

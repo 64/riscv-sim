@@ -25,6 +25,8 @@ impl ReservationStation {
 
     pub fn insert(&mut self, tag: Tag, inst: RenamedInst) {
         debug_assert!(!self.is_full());
+        debug_assert!(!self.waiting.iter().any(|(t, _)| *t == tag), "inst {:?} already in RS", tag);
+        // debug_assert!(!self.ready.iter().any(|(t, _)| *t == tag));
         self.waiting.push((tag, inst));
     }
 
@@ -33,6 +35,7 @@ impl ReservationStation {
         self.waiting.retain(
             |(tag, renamed_inst)| match renamed_inst.get_ready(reg_file) {
                 Some(ready_inst) => {
+                    // TODO: use linear search?
                     let pos = self
                         .ready
                         .binary_search_by_key(&tag, |(t, _)| t)

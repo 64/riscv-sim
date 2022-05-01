@@ -21,9 +21,10 @@ type CyclesTaken = u64;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionUnit {
-    eu_type: EuType,
-    executing_inst: Option<(Tagged<ReadyInst>, CyclesTaken)>,
+    pub eu_type: EuType,
+    pub utilisation: u64,
     completed_inst: Option<(Tagged<ExecutedInst>, EuResult)>,
+    executing_insts: Vec<(Tagged<ReadyInst>, CyclesTaken)>,
 }
 
 // TODO: get rid of begin_inst
@@ -32,46 +33,59 @@ impl ExecutionUnit {
     pub fn new(eu_type: EuType) -> Self {
         Self {
             eu_type,
-            executing_inst: Default::default(),
+            utilisation: 0,
             completed_inst: Default::default(),
+            executing_insts: Default::default(),
         }
     }
 
     pub fn can_execute(&self, inst: &ReadyInst) -> bool {
-        self.eu_type == inst.eu_type() && self.executing_inst.is_none()
+        self.eu_type == inst.eu_type() && !self.was_utilised()
     }
 
     pub fn begin_execute(&mut self, inst: ReadyInst, tag: Tag) {
         debug_assert!(self.can_execute(&inst));
-        self.executing_inst = Some((Tagged { tag, inst }, 0));
+        self.executing_insts.push((Tagged { tag, inst }, 0));
+    }
+
+    pub fn was_utilised(&self) -> bool {
+        self.executing_insts.last().map(|e| e.1 == 0).unwrap_or(false)
     }
 
     pub fn advance(&mut self, mem: &mut MemoryHierarchy, stats: &mut Stats) {
-        if let Some((Tagged { tag, inst }, cycles)) = self.executing_inst.take() {
+        let mut deleted_idx = None;
+
+        if self.was_utilised() {
+            self.utilisation += 1;
+        }
+
+        for (i, (Tagged { tag, inst }, cycles)) in self.executing_insts.iter_mut().enumerate() {
             let is_done = if inst.is_mem_access() {
-                mem.access_complete(tag, inst.access_addr(), stats)
+                mem.access_complete(*tag, inst.access_addr(), stats)
             } else {
-                cycles + 1 >= inst.latency()
+                *cycles + 1 >= inst.latency()
             };
 
             if is_done && self.completed_inst.is_none() {
                 if inst.is_mem_access() {
-                    mem.finish_access(tag, inst.access_addr());
+                    mem.finish_access(*tag, inst.access_addr());
                 }
 
-                let res = self.compute_result(&inst, mem);
+                let res = ExecutionUnit::compute_result(inst, mem);
+                deleted_idx = Some(i);
                 self.completed_inst = Some((
                     Tagged {
-                        tag,
-                        inst: inst.executed(),
+                        tag: *tag,
+                        inst: inst.clone().executed(),
                     },
                     res,
                 ));
             } else {
-                // Increment cycles, and carry on.
-                self.executing_inst = Some((Tagged { tag, inst }, cycles + 1));
+                *cycles += 1;
             }
         }
+
+        deleted_idx.map(|i| self.executing_insts.remove(i));
     }
 
     pub fn take_complete(&mut self) -> Option<(Tagged<ExecutedInst>, EuResult)> {
@@ -79,11 +93,8 @@ impl ExecutionUnit {
     }
 
     pub fn kill_tags_after(&mut self, tag: Tag) {
-        if let Some((tagged, _)) = &self.executing_inst {
-            if tagged.tag > tag {
-                self.executing_inst = None;
-            }
-        }
+        self.executing_insts.retain(|(Tagged { tag: t, .. }, _)| *t <= tag);
+
         if let Some((tagged, _)) = &self.completed_inst {
             if tagged.tag > tag {
                 self.completed_inst = None;
@@ -91,7 +102,7 @@ impl ExecutionUnit {
         }
     }
 
-    fn compute_result(&self, inst: &ReadyInst, mem: &mut MemoryHierarchy) -> EuResult {
+    fn compute_result(inst: &ReadyInst, mem: &mut MemoryHierarchy) -> EuResult {
         let val = match inst {
             Inst::Add(_, src0, src1) => src0.wrapping_add(*src1),
             Inst::Sub(_, src0, src1) => src0.wrapping_sub(*src1),

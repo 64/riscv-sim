@@ -1,6 +1,6 @@
 use std::{fmt, time::Instant};
 
-use crate::{mem::MainMemory, program::Program, regs::RegSet};
+use crate::{mem::MainMemory, program::Program, regs::RegSet, execution_unit::{ExecutionUnit, EuType}};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CpuState {
@@ -21,6 +21,7 @@ pub struct Stats {
     pub l1_miss: u64,
     pub l2_miss: u64,
     pub l3_miss: u64,
+    pub eu_util: Vec<(EuType, f32)>,
 }
 
 #[derive(Clone)]
@@ -49,8 +50,19 @@ impl Default for Stats {
             l1_miss: 0,
             l2_miss: 0,
             l3_miss: 0,
+            eu_util: Vec::new(),
             start: Instant::now(),
         }
+    }
+}
+
+impl Stats {
+    pub fn calculate_util(mut self, eus: &[ExecutionUnit]) -> Self {
+        for eu in eus {
+            self.eu_util.push((eu.eu_type, eu.utilisation as f32 / self.cycles_taken as f32));
+        }
+
+        self
     }
 }
 
@@ -99,6 +111,7 @@ impl fmt::Display for ExecResult {
         if self.stats.l3_miss != 0 {
             writeln!(f, "         L3 cache misses: {}", self.stats.l3_miss)?;
         }
+
         writeln!(f, "    Instructions retired: {}", self.stats.insts_retired)?;
         writeln!(f, "            Cycles taken: {}", self.stats.cycles_taken)?;
         writeln!(
@@ -110,6 +123,15 @@ impl fmt::Display for ExecResult {
             f,
             "  Simulator time elapsed: {:.2}s",
             self.stats.start.elapsed().as_secs_f32()
-        )
+        )?;
+
+        writeln!(f, "          EU utilisation:")?;
+        for (eu_type, util) in &self.stats.eu_util {
+            if *eu_type != EuType::Special {
+                writeln!(f, "{:>23} = {:>2.0}%", format!("{:?}", eu_type), util * 100.0)?;
+            }
+        }
+
+        Ok(())
     }
 }

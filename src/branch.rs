@@ -36,5 +36,6 @@ impl BranchPredictor {
         // true
     }
 
-    pub fn update_prediction(&mut self, pc: u32, target: u32, taken: bool) { todo!() }
+    #[allow(dead_code)]
+    pub fn update_prediction(&mut self, _pc: u32, _target: u32, _taken: bool) { todo!() }
 }

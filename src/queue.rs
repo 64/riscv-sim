@@ -30,6 +30,10 @@ impl<T: Clone> Queue<T> {
         self.data.front()
     }
 
+    pub fn back(&self) -> Option<&T> {
+        self.data.back()
+    }
+
     pub fn is_full(&self) -> bool {
         self.data.capacity() == self.data.len()
     }

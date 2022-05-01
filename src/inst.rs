@@ -281,7 +281,7 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
             | Inst::AddImm(_, _, _)
             | Inst::AndImm(_, _, _)
             | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
-            Inst::Mul(_, _, _) => 3,
+            Inst::Mul(_, _, _) => 2,
             Inst::Rem(_, _, _) => 3,
             Inst::Halt => 1,
             _ => unimplemented!("{:?}", self),

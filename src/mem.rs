@@ -61,8 +61,12 @@ impl MemoryHierarchy {
                     // If we have an outstanding fetch to an addr, only wait until that one
                     // completes. Otherwise dram fetch + (wait n cycles) + dram fetch to same addr will take
                     // very long.
-                    unreachable!();
-                    // L1_LATENCY + (p.end - p.current)
+                    // unreachable!();
+                    // dbg!(&self.pending_fetches);
+                    // dbg!(tag);
+                    // dbg!(p);
+                    // TODO: WE should just implement load/store forwarding
+                    L1_LATENCY// + (p.end - p.current)
                 } else if self.l1.get(&addr).is_some() {
                     L1_LATENCY
                 } else if self.l2.get(&addr).is_some() {
