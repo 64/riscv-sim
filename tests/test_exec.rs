@@ -114,6 +114,78 @@ mod t {
         run(9);
     }
 
+    #[test]
+    fn test_quicksort<C: Cpu>() {
+        let run = |len| {
+            let mem = parse_and_exec::<C>(
+                "quicksort",
+                RegSet::from([(ArchReg::A0, 0), (ArchReg::A1, len)]),
+                MainMemory::new(),
+            )
+            .mem;
+
+            for i in 0..len {
+                let val = mem.readw(Addr(4 * i));
+                assert_eq!(val, i + 1, "addr 4*{} = {}", i, val);
+            }
+        };
+
+        run(1);
+        run(2);
+        run(4);
+        run(8);
+        run(9);
+        run(50);
+        run(100);
+    }
+
+    #[test]
+    fn test_factorial<C: Cpu>() {
+        let run = |x| {
+            let val = parse_and_exec::<C>(
+                "factorial",
+                RegSet::from([(ArchReg::A0, x)]),
+                MainMemory::new(),
+            )
+            .regs
+            .get(ArchReg::A0);
+
+            let expected: u32 = (1..=x).product();
+            assert_eq!(val, expected);
+        };
+
+        for i in 0..10 {
+            run(i);
+        }
+    }
+
+    #[test]
+    fn test_fibonnaci<C: Cpu>() {
+        fn fib(n: u32) -> u32 {
+            if n <= 1 {
+                1
+            } else {
+                fib(n - 1) + fib(n - 2)
+            }
+        }
+
+        let run = |x| {
+            let val = parse_and_exec::<C>(
+                "fibonnaci",
+                RegSet::from([(ArchReg::A0, x)]),
+                MainMemory::new(),
+            )
+            .regs
+            .get(ArchReg::A0);
+
+            assert_eq!(val, fib(x));
+        };
+
+        for i in 0..10 {
+            run(i);
+        }
+    }
+
     #[instantiate_tests(<Emulated>)]
     mod emulated {}
 

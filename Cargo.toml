@@ -6,8 +6,8 @@ edition = "2021"
 [features]
 
 [profile.release]
-# debug = false
-debug = true
+debug = false
+# debug = true
 
 [dependencies]
 associative-cache = "1.0.1"

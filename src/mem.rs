@@ -10,12 +10,17 @@ const L2_CAPACITY_BYTES: usize = 32_000;
 const L3_CAPACITY_BYTES: usize = 128_000;
 const DRAM_CAPACITY_BYTES: usize = 1_024_000;
 
-pub const STACK_TOP: usize = DRAM_CAPACITY_BYTES - 2_000;
+pub const STACK_TOP: usize = DRAM_CAPACITY_BYTES - 16_000;
 
 // const L1_LATENCY: u64 = 5;
 // const L2_LATENCY: u64 = 20;
 // const L3_LATENCY: u64 = 40;
 // const DRAM_LATENCY: u64 = 400;
+
+// const L1_LATENCY: u64 = 3;
+// const L2_LATENCY: u64 = 3;
+// const L3_LATENCY: u64 = 3;
+// const DRAM_LATENCY: u64 = 3;
 
 const L1_LATENCY: u64 = 1;
 const L2_LATENCY: u64 = 1;
@@ -155,15 +160,18 @@ impl MainMemory {
     }
 
     pub fn readb(&self, addr: Addr) -> u32 {
+        // println!("READb at {:?}", addr);
         let sx = i8::from_le_bytes([self.mem[addr.0 as usize]]) as i32;
         u32::from_le_bytes(sx.to_le_bytes())
     }
 
     pub fn readbu(&self, addr: Addr) -> u32 {
+        // println!("READbu at {:?}", addr);
         self.mem[addr.0 as usize] as u32
     }
 
     pub fn readh(&self, addr: Addr) -> u32 {
+        // println!("READh at {:?}", addr);
         let a = addr.0 as usize;
         assert!(a % 2 == 0);
 
@@ -172,6 +180,7 @@ impl MainMemory {
     }
 
     pub fn readw(&self, addr: Addr) -> u32 {
+        // println!("READw at {:?}", addr);
         let a = addr.0 as usize;
         assert!(a % 4 == 0);
 

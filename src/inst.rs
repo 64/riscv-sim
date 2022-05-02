@@ -78,6 +78,7 @@ pub enum Inst<
     LoadWord(DstReg, MemRef<SrcReg>),
     IndexedLoadByteU(DstReg, SrcReg, SrcReg, Imm),
     EffectiveAddress(DstReg, SrcReg, SrcReg, Imm),
+    LoadFullImm(DstReg, Imm),
     StoreByte(SrcReg, MemRef<SrcReg>),
     StoreHalfWord(SrcReg, MemRef<SrcReg>),
     StoreWord(SrcReg, MemRef<SrcReg>),
@@ -95,7 +96,9 @@ pub enum Inst<
     ShiftRightArithImm(DstReg, SrcReg, Imm),
     ShiftRightLogicalImm(DstReg, SrcReg, Imm),
     Mul(DstReg, SrcReg, SrcReg),
+    MulHU(DstReg, SrcReg, SrcReg),
     Rem(DstReg, SrcReg, SrcReg),
+    Div(DstReg, SrcReg, SrcReg),
     DivU(DstReg, SrcReg, SrcReg),
     JumpAndLink(DstReg, JumpType),
     JumpAndLinkRegister(DstReg, SrcReg, Imm),
@@ -184,21 +187,18 @@ impl FromStr for LabeledInst {
             "andi" => LabeledInst::AndImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "or" => LabeledInst::Or(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "ori" => LabeledInst::OrImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
-            // "ori" => LabeledInst::Halt,
             "xori" => LabeledInst::XorImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
-            // "xori" => LabeledInst::Halt,
             "xor" => LabeledInst::Xor(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
-            // "xor" => LabeledInst::Halt,
             "slli" => LabeledInst::ShiftLeftLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "srai" => LabeledInst::ShiftRightArithImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "srli" => LabeledInst::ShiftRightLogicalImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
-            // "srli" => LabeledInst::Halt,
             "mul" => LabeledInst::Mul(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
+            "mulhu" => LabeledInst::MulHU(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "rem" => LabeledInst::Rem(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
+            "div" => LabeledInst::Div(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "divu" => LabeledInst::DivU(reg_arg(0)?, reg_arg(1)?, reg_arg(2)?),
             "li" => LabeledInst::AddImm(reg_arg(0)?, ArchReg::Zero, imm_arg(1)?),
             "lui" => LabeledInst::LoadUpperImm(reg_arg(0)?, imm_arg(1)?),
-            // "lui" => LabeledInst::Halt,
             "mv" => LabeledInst::AddImm(reg_arg(0)?, reg_arg(1)?, Imm(0)),
             "j" => LabeledInst::JumpAndLink(ArchReg::Zero, label_arg(0)?),
             "jal" => LabeledInst::JumpAndLink(reg_arg(0)?, label_arg(1)?),
@@ -214,15 +214,14 @@ impl FromStr for LabeledInst {
             "blez" => LabeledInst::BranchIfGreaterEqual(ArchReg::Zero, reg_arg(0)?, label_arg(1)?),
             "bgez" => LabeledInst::BranchIfGreaterEqual(reg_arg(0)?, ArchReg::Zero, label_arg(1)?),
             "blt" => LabeledInst::BranchIfLess(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
+            "bltu" => LabeledInst::BranchIfLessU(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bgt" => LabeledInst::BranchIfLess(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
             "bleu" => LabeledInst::BranchIfGreaterEqualU(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
             "bgeu" => LabeledInst::BranchIfGreaterEqualU(reg_arg(0)?, reg_arg(1)?, label_arg(2)?),
             "bgtu" => LabeledInst::BranchIfLessU(reg_arg(1)?, reg_arg(0)?, label_arg(2)?),
             "sltiu" => LabeledInst::SetLessThanImmU(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
             "snez" => LabeledInst::SetLessThanU(reg_arg(0)?, ArchReg::Zero, reg_arg(1)?),
-            // "snez" => LabeledInst::Halt,
             "slti" => LabeledInst::SetLessThanImm(reg_arg(0)?, reg_arg(1)?, imm_arg(2)?),
-            // "slti" => LabeledInst::Halt,
             "seqz" => LabeledInst::SetLessThanImmU(reg_arg(0)?, reg_arg(1)?, Imm(1)),
             "hlt" => LabeledInst::Halt,
             "nop" => LabeledInst::nop(),
@@ -263,7 +262,9 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
     pub fn is_fused(&self) -> bool {
         matches!(
             self,
-            Inst::EffectiveAddress(_, _, _, _) | Inst::IndexedLoadByteU(_, _, _, _)
+            Inst::EffectiveAddress(_, _, _, _)
+                | Inst::IndexedLoadByteU(_, _, _, _)
+                | Inst::LoadFullImm(_, _)
         )
     }
 
@@ -312,8 +313,11 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
             | Inst::SetLessThanU(_, _, _)
             | Inst::SetLessThanImm(_, _, _)
             | Inst::LoadUpperImm(_, _)
+            | Inst::LoadFullImm(_, _)
             | Inst::Mul(_, _, _)
+            | Inst::MulHU(_, _, _)
             | Inst::DivU(_, _, _)
+            | Inst::Div(_, _, _)
             | Inst::Rem(_, _, _) => EuType::Alu,
             Inst::LoadByte(_, _)
             | Inst::LoadByteU(_, _)
@@ -343,13 +347,14 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
             | Inst::OrImm(_, _, _)
             | Inst::Xor(_, _, _)
             | Inst::XorImm(_, _, _)
+            | Inst::LoadFullImm(_, _)
             | Inst::LoadUpperImm(_, _)
             | Inst::EffectiveAddress(_, _, _, _)
             | Inst::ShiftRightArithImm(_, _, _)
             | Inst::ShiftRightLogicalImm(_, _, _)
             | Inst::ShiftLeftLogicalImm(_, _, _) => 1,
             Inst::Mul(_, _, _) => 2,
-            Inst::Rem(_, _, _) | Inst::DivU(_, _, _) => 3,
+            Inst::Rem(_, _, _) | Inst::Div(_, _, _) | Inst::DivU(_, _, _) => 3,
             Inst::Halt => 1,
             _ => unimplemented!("{:?}", self),
         }
@@ -380,6 +385,7 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
             Inst::OrImm(dst, src, imm) => Inst::OrImm(dst_fn(dst)?, src_fn(src)?, imm),
             Inst::Xor(dst, src0, src1) => Inst::Xor(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::XorImm(dst, src, imm) => Inst::XorImm(dst_fn(dst)?, src_fn(src)?, imm),
+            Inst::LoadFullImm(dst, imm) => Inst::LoadFullImm(dst_fn(dst)?, imm),
             Inst::LoadUpperImm(dst, imm) => Inst::LoadUpperImm(dst_fn(dst)?, imm),
             Inst::EffectiveAddress(dst, src1, src2, imm) => Inst::EffectiveAddress(dst_fn(dst)?, src_fn(src1)?, src_fn(src2)?, imm),
             Inst::ShiftLeftLogicalImm(dst, src, imm) => Inst::ShiftLeftLogicalImm(dst_fn(dst)?, src_fn(src)?, imm),
@@ -389,7 +395,9 @@ impl<SrcReg: Debug + Clone, DstReg: Debug + Clone, JumpType: Debug + Clone>
             Inst::SetLessThanImm(dst, src, imm) => Inst::SetLessThanImm(dst_fn(dst)?, src_fn(src)?, imm),
             Inst::SetLessThanImmU(dst, src, imm) => Inst::SetLessThanImmU(dst_fn(dst)?, src_fn(src)?, imm),
             Inst::Mul(dst, src0, src1) => Inst::Mul(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
+            Inst::MulHU(dst, src0, src1) => Inst::MulHU(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::Rem(dst, src0, src1) => Inst::Rem(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
+            Inst::Div(dst, src0, src1) => Inst::Div(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::DivU(dst, src0, src1) => Inst::DivU(dst_fn(dst)?, src_fn(src0)?, src_fn(src1)?),
             Inst::LoadByte(dst, src) => Inst::LoadByte(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
             Inst::LoadByteU(dst, src) => Inst::LoadByteU(dst_fn(dst)?, MemRef { base: src_fn(src.base)?, offset: src.offset }),
@@ -523,8 +531,8 @@ impl FromStr for Imm {
             Ok(Self(u))
         } else if let Ok(s) = i32::try_from(val) {
             assert!(s < 0);
-            let abs: u32 = s.abs().try_into().unwrap();
-            Ok(Self(u32::MAX - abs + 1))
+            let val = u32::from_le_bytes(s.to_le_bytes());
+            Ok(Self(val))
         } else {
             Err(format!("invalid immediate: '{s}'"))
         }

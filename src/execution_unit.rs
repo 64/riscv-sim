@@ -125,6 +125,12 @@ impl ExecutionUnit {
                     *src0 % *src1
                 }
             }
+            Inst::Div(_, src0, src1) => {
+                let a = i32::from_le_bytes(src0.to_le_bytes());
+                let b = i32::from_le_bytes(src1.to_le_bytes());
+                let res = if b == 0 { -1 } else { a / b };
+                u32::from_le_bytes(res.to_le_bytes())
+            }
             Inst::DivU(_, src0, src1) => {
                 if *src1 == 0 {
                     u32::MAX
@@ -133,7 +139,7 @@ impl ExecutionUnit {
                 }
             }
             Inst::EffectiveAddress(_, src1, src2, imm) => {
-                src1.wrapping_add(src2.wrapping_shl(imm.0))
+                src2.wrapping_add(src1.wrapping_shl(imm.0))
             }
             Inst::JumpAndLinkRegister(_, src, imm) => src.wrapping_add(imm.0),
             Inst::ShiftRightArithImm(_, src, imm) => {
@@ -148,6 +154,7 @@ impl ExecutionUnit {
                 let b = i32::from_le_bytes(imm.0.to_le_bytes());
                 (a < b).into()
             }
+            Inst::LoadFullImm(_, imm) => imm.0,
             Inst::LoadUpperImm(_, imm) => imm.0 << 12,
             Inst::SetLessThanImmU(_, src, imm) => (src < &imm.0).into(),
             Inst::JumpAndLink(_, imm) => imm.0,

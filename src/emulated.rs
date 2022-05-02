@@ -50,8 +50,8 @@ impl Emulated {
         };
 
         if std::env::var("SINGLE_STEP").is_ok() {
+            print!("{:?} @ {}", next_inst, self.stats.insts_retired);
             use std::io::Write;
-            print!("{:?} @ {}", next_inst, self.stats.cycles_taken);
             std::io::stdout().flush().unwrap();
             std::io::stdin().read_line(&mut String::new()).unwrap();
         }
@@ -152,6 +152,12 @@ impl Emulated {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 self.regs.set(dst, a.wrapping_mul(b));
+            }
+            Inst::Div(dst, src0, src1) => {
+                let a = i32::from_le_bytes(self.regs.get(src0).to_le_bytes());
+                let b = i32::from_le_bytes(self.regs.get(src1).to_le_bytes());
+                let val = if b == 0 { -1 } else { a / b };
+                self.regs.set(dst, u32::from_le_bytes(val.to_le_bytes()));
             }
             Inst::DivU(dst, src0, src1) => {
                 let a = self.regs.get(src0);

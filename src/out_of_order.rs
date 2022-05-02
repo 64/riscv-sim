@@ -4,7 +4,7 @@ use crate::{
     branch::BranchPredictor,
     cpu::{Cpu, ExecResult, Stats},
     execution_unit::{EuType, ExecutionUnit},
-    inst::{AbsPc, ArchReg, ExecutedInst, Inst, RenamedInst, Tag, Tagged, INST_SIZE},
+    inst::{AbsPc, ArchReg, ExecutedInst, Imm, Inst, RenamedInst, Tag, Tagged, INST_SIZE},
     lsq::LoadStoreQueue,
     mem::{MainMemory, MemoryHierarchy},
     program::Program,
@@ -91,7 +91,7 @@ pub struct OutOfOrder {
 }
 
 const PIPE_WIDTH: u64 = 4;
-const USE_FUSION: bool = true;
+const MACRO_OP_FUSE: bool = true;
 
 impl Cpu for OutOfOrder {
     fn new(prog: Program, regs: RegSet, mem: MainMemory) -> Self {
@@ -100,8 +100,6 @@ impl Cpu for OutOfOrder {
             prog,
             execution_units: vec![
                 ExecutionUnit::new(EuType::Branch),
-                ExecutionUnit::new(EuType::Branch),
-                ExecutionUnit::new(EuType::LoadStore),
                 ExecutionUnit::new(EuType::LoadStore),
                 ExecutionUnit::new(EuType::Alu),
                 ExecutionUnit::new(EuType::Alu),
@@ -177,7 +175,7 @@ impl Cpu for OutOfOrder {
             #[cfg(debug_assertions)]
             if std::env::var("SINGLE_STEP").is_ok() {
                 self.dump(&pipe);
-                std::io::stdin().read_line(&mut String::new()).unwrap();
+                // std::io::stdin().read_line(&mut String::new()).unwrap();
             }
 
             debug_assert!(
@@ -189,15 +187,21 @@ impl Cpu for OutOfOrder {
 }
 
 impl OutOfOrder {
-    #[allow(dead_code)]
+    #[allow(dead_code, unused)]
     fn dump(&self, pipe: &Pipeline) {
         // dbg!(&self.lsq);
         // dbg!(&self.reg_file);
         // dbg!(&self.reservation_station);
         // dbg!(&self.rob);
         // dbg!(&self.execution_units);
-        dbg!(pipe);
+        // dbg!(pipe);
         // dbg!(self.stats.cycles_taken);
+
+        // for next_inst in pipe.fetch_decode.insts.iter().map(|t| &t.inst) {
+        //     println!("{:?}", next_inst);
+        //     use std::io::Write;
+        //     std::io::stdout().flush().unwrap();
+        // }
     }
 
     // TODO: narrow
@@ -209,17 +213,48 @@ impl OutOfOrder {
             .cloned()
             .unwrap_or(Inst::Halt);
 
-        let fused = if USE_FUSION {
+        let fused = if MACRO_OP_FUSE {
+            #[allow(unused)]
             match (&inst, &next_inst) {
+                (Inst::Add(rd1, rs1, rs2), Inst::LoadByte(rd2, mem_ref))
+                    if rd1 == rd2 && *rd2 == mem_ref.base =>
+                {
+                    todo!()
+                    // Some(Inst::IndexedLoadByte(*rd2, *rs1, *rs2, mem_ref.offset))
+                }
                 (Inst::Add(rd1, rs1, rs2), Inst::LoadByteU(rd2, mem_ref))
                     if rd1 == rd2 && *rd2 == mem_ref.base =>
                 {
                     Some(Inst::IndexedLoadByteU(*rd2, *rs1, *rs2, mem_ref.offset))
                 }
+                (Inst::Add(rd1, rs1, rs2), Inst::LoadHalfWord(rd2, mem_ref))
+                    if rd1 == rd2 && *rd2 == mem_ref.base =>
+                {
+                    todo!()
+                    // Some(Inst::IndexedLoadHalfWord(*rd2, *rs1, *rs2, mem_ref.offset))
+                }
+                // (Inst::Add(rd1, rs1, rs2), Inst::LoadHalfWordU(rd2, mem_ref))
+                //     if rd1 == rd2 && *rd2 == mem_ref.base =>
+                // {
+                //     todo!()
+                //     // Some(Inst::IndexedLoadHalfWordU(*rd2, *rs1, *rs2, mem_ref.offset))
+                // }
+                (Inst::Add(rd1, rs1, rs2), Inst::LoadWord(rd2, mem_ref))
+                    if rd1 == rd2 && *rd2 == mem_ref.base =>
+                {
+                    todo!()
+                    // Some(Inst::IndexedLoadWord(*rd2, *rs1, *rs2, mem_ref.offset))
+                }
                 (Inst::ShiftLeftLogicalImm(rd1, rs1, imm), Inst::Add(rd2, rs2, rs3))
                     if rd1 == rd2 && rd2 == rs2 =>
                 {
                     Some(Inst::EffectiveAddress(*rd2, *rs1, *rs3, *imm))
+                }
+                (Inst::LoadUpperImm(rd1, imm1), Inst::AddImm(rd2, rs1, imm2))
+                    if rd1 == rd2 && rd2 == rs1 =>
+                {
+                    let x = (imm1.0 << 12).wrapping_add(imm2.0);
+                    Some(Inst::LoadFullImm(*rd2, Imm(x)))
                 }
                 _ => None,
             }
@@ -247,6 +282,7 @@ impl OutOfOrder {
 
                     self.reg_file
                         .begin_predict_direct(tag, predict_taken, taken_pc, not_taken_pc);
+                    // println!("begin predict {:?} at {:?} ({})", inst, self.stats.insts_retired, predict_taken);
 
                     if predict_taken {
                         Some(taken_pc)
@@ -255,10 +291,12 @@ impl OutOfOrder {
                     }
                 }
                 Inst::JumpAndLink(_, tgt) => {
+                    // println!("jal {:?} at {:?}", inst, self.stats.insts_retired);
                     self.pc_map.insert(tag, pc);
                     Some(*tgt)
                 }
                 Inst::JumpAndLinkRegister(_, _, _) => {
+                    // println!("begin predict indirect {:?} at {:?}", inst, self.stats.insts_retired);
                     let predicted_addr = self.branch_predictor.predict_indirect(pc);
                     self.reg_file
                         .begin_predict_indirect(tag, predicted_addr, pc);
@@ -466,7 +504,9 @@ impl OutOfOrder {
                     | Inst::AddImm(dst, _, _)
                     | Inst::Sub(dst, _, _)
                     | Inst::Mul(dst, _, _)
+                    | Inst::MulHU(dst, _, _)
                     | Inst::Rem(dst, _, _)
+                    | Inst::Div(dst, _, _)
                     | Inst::DivU(dst, _, _)
                     | Inst::And(dst, _, _)
                     | Inst::AndImm(dst, _, _)
@@ -474,6 +514,7 @@ impl OutOfOrder {
                     | Inst::OrImm(dst, _, _)
                     | Inst::Xor(dst, _, _)
                     | Inst::XorImm(dst, _, _)
+                    | Inst::LoadFullImm(dst, _)
                     | Inst::LoadUpperImm(dst, _)
                     | Inst::SetLessThanU(dst, _, _)
                     | Inst::SetLessThanImm(dst, _, _)
@@ -509,6 +550,7 @@ impl OutOfOrder {
                             &mut self.branch_predictor,
                         ) {
                             // Flush
+                            // println!("FLUSH DIRECT");
                             self.stats.direct_mispredicts += 1;
                             self.kill_tags_after(tag);
                             next_fetch = Some(next_pc);
@@ -545,10 +587,13 @@ impl OutOfOrder {
                             .map(|predicted_pc| actual_pc != predicted_pc)
                             .unwrap_or(false)
                         {
+                            // println!("FLUSH INDIRECT");
                             self.stats.indirect_mispredicts += 1;
                             self.kill_tags_after(tag);
+                            next_fetch = Some(actual_pc);
+                        } else if predicted_pc.is_none() {
+                            next_fetch = Some(actual_pc);
                         }
-                        next_fetch = Some(actual_pc);
                     }
                     Inst::StoreWord(_, _)
                     | Inst::StoreHalfWord(_, _)
@@ -590,7 +635,9 @@ impl OutOfOrder {
                 | Inst::AddImm(dst, _, _)
                 | Inst::Sub(dst, _, _)
                 | Inst::Mul(dst, _, _)
+                | Inst::MulHU(dst, _, _)
                 | Inst::Rem(dst, _, _)
+                | Inst::Div(dst, _, _)
                 | Inst::DivU(dst, _, _)
                 | Inst::And(dst, _, _)
                 | Inst::AndImm(dst, _, _)
@@ -608,6 +655,7 @@ impl OutOfOrder {
                 | Inst::JumpAndLinkRegister(dst, _, _)
                 | Inst::EffectiveAddress(dst, _, _, _)
                 | Inst::IndexedLoadByteU(dst, _, _, _)
+                | Inst::LoadFullImm(dst, _)
                 | Inst::LoadUpperImm(dst, _)
                 | Inst::LoadByteU(dst, _)
                 | Inst::LoadByte(dst, _)
@@ -628,8 +676,8 @@ impl OutOfOrder {
                 | Inst::BranchIfLess(_, _, _)
                 | Inst::BranchIfLessU(_, _, _)
                 | Inst::BranchIfNotEqual(_, _, _)
+                | Inst::BranchIfGreaterEqual(_, _, _)
                 | Inst::BranchIfGreaterEqualU(_, _, _) => (),
-                Inst::BranchIfGreaterEqual(_, _, _) => (),
                 _ => unimplemented!("{:?}", inst),
             }
 

@@ -113,16 +113,20 @@ impl fmt::Display for ExecResult {
         if self.stats.direct_predicts != 0 {
             writeln!(
                 f,
-                "      Direct mispredicts: {:.2}%",
+                "      Direct mispredicts: {:.2}% ({}/{})",
                 100.0 * self.stats.direct_mispredicts as f32 / self.stats.direct_predicts as f32,
+                self.stats.direct_mispredicts,
+                self.stats.direct_predicts,
             )?;
         }
         if self.stats.indirect_predicts != 0 {
             writeln!(
                 f,
-                "    Indirect mispredicts: {:.2}%",
+                "    Indirect mispredicts: {:.2}% ({}/{})",
                 100.0 * self.stats.indirect_mispredicts as f32
                     / self.stats.indirect_predicts as f32,
+                self.stats.indirect_mispredicts,
+                self.stats.indirect_predicts,
             )?;
         }
         if self.stats.l1_hits != 0 {
