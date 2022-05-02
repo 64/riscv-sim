@@ -99,6 +99,8 @@ impl Cpu for OutOfOrder {
             prog,
             execution_units: vec![
                 ExecutionUnit::new(EuType::Branch),
+                ExecutionUnit::new(EuType::Branch),
+                ExecutionUnit::new(EuType::LoadStore),
                 ExecutionUnit::new(EuType::LoadStore),
                 ExecutionUnit::new(EuType::Alu),
                 ExecutionUnit::new(EuType::Alu),
@@ -448,6 +450,8 @@ impl OutOfOrder {
                         let taken = result.val == 1;
                         let predicted_taken = self.reg_file.was_predicted_taken(tag);
 
+                        self.stats.direct_predicts += 1;
+
                         if let Some(next_pc) = self.reg_file.end_predict_direct(
                             tag,
                             taken,
@@ -470,6 +474,10 @@ impl OutOfOrder {
                     }
                     Inst::JumpAndLinkRegister(dst, _, _) => {
                         let (predicted_pc, inst_pc) = self.reg_file.predicted_addr(tag);
+
+                        if predicted_pc.is_some() {
+                            self.stats.indirect_predicts += 1;
+                        }
 
                         if dst.arch != ArchReg::Zero {
                             self.reg_file

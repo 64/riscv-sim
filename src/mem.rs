@@ -12,11 +12,15 @@ const DRAM_CAPACITY_BYTES: usize = 1_024_000;
 
 pub const STACK_TOP: usize = DRAM_CAPACITY_BYTES - 2_000;
 
-const L1_LATENCY: u64 = 5;
-const L2_LATENCY: u64 = 20;
-const L3_LATENCY: u64 = 40;
-const DRAM_LATENCY: u64 = 400;
-// const DRAM_LATENCY: u64 = 1;
+// const L1_LATENCY: u64 = 5;
+// const L2_LATENCY: u64 = 20;
+// const L3_LATENCY: u64 = 40;
+// const DRAM_LATENCY: u64 = 400;
+
+const L1_LATENCY: u64 = 1;
+const L2_LATENCY: u64 = 1;
+const L3_LATENCY: u64 = 1;
+const DRAM_LATENCY: u64 = 1;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MainMemory {

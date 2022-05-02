@@ -32,7 +32,9 @@ pub struct Stats {
     pub cycles_taken: u64,
     pub insts_retired: u64,
     pub direct_mispredicts: u64,
+    pub direct_predicts: u64,
     pub indirect_mispredicts: u64,
+    pub indirect_predicts: u64,
     pub rob_stalls: u64,
     pub reservation_station_stalls: u64,
     pub lsq_stalls: u64,
@@ -107,18 +109,18 @@ impl fmt::Display for ExecResult {
         if self.stats.rob_stalls != 0 {
             writeln!(f, "   Reorder buffer stalls: {}", self.stats.rob_stalls)?;
         }
-        if self.stats.direct_mispredicts != 0 {
+        if self.stats.direct_predicts != 0 {
             writeln!(
                 f,
-                "      Direct mispredicts: {}",
-                self.stats.direct_mispredicts
+                "      Direct mispredicts: {:.2}%",
+                100.0 * self.stats.direct_mispredicts as f32 / self.stats.direct_predicts as f32,
             )?;
         }
-        if self.stats.indirect_mispredicts != 0 {
+        if self.stats.indirect_predicts != 0 {
             writeln!(
                 f,
-                "    Indirect mispredicts: {}",
-                self.stats.indirect_mispredicts
+                "    Indirect mispredicts: {:.2}%",
+                100.0 * self.stats.indirect_mispredicts as f32 / self.stats.indirect_predicts as f32,
             )?;
         }
         if self.stats.l1_hits != 0 {
@@ -147,10 +149,11 @@ impl fmt::Display for ExecResult {
             "  Instructions per clock: {:.2}",
             self.stats.insts_retired as f32 / self.stats.cycles_taken as f32
         )?;
+        let elapsed = self.stats.start.time.elapsed().as_secs_f32();
         writeln!(
             f,
-            "  Simulator time elapsed: {:.2}s",
-            self.stats.start.time.elapsed().as_secs_f32()
+            "  Simulator time elapsed: {:.2}s ({:.0} KHz)",
+            elapsed, self.stats.cycles_taken as f32 / elapsed / 1_000.0
         )?;
 
         if self.stats.eu_util.len() > 0 {
