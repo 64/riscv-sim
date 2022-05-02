@@ -50,7 +50,9 @@ impl Emulated {
         };
 
         if std::env::var("SINGLE_STEP").is_ok() {
-            println!("{:?}", next_inst);
+            use std::io::Write;
+            print!("{:?} @ {}", next_inst, self.stats.cycles_taken);
+            std::io::stdout().flush().unwrap();
             std::io::stdin().read_line(&mut String::new()).unwrap();
         }
 
@@ -100,11 +102,6 @@ impl Emulated {
                 let b = imm.0;
                 self.regs.set(dst, a.wrapping_add(b));
             }
-            Inst::Or(dst, src0, src1) => {
-                let a = self.regs.get(src0);
-                let b = self.regs.get(src1);
-                self.regs.set(dst, a | b);
-            }
             Inst::And(dst, src0, src1) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
@@ -114,6 +111,37 @@ impl Emulated {
                 let a = self.regs.get(src);
                 let b = imm.0;
                 self.regs.set(dst, a & b);
+            }
+            Inst::Or(dst, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                self.regs.set(dst, a | b);
+            }
+            Inst::OrImm(dst, src, imm) => {
+                let a = self.regs.get(src);
+                let b = imm.0;
+                self.regs.set(dst, a | b);
+            }
+            Inst::Xor(dst, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                self.regs.set(dst, a ^ b);
+            }
+            Inst::XorImm(dst, src, imm) => {
+                let a = self.regs.get(src);
+                let b = imm.0;
+                self.regs.set(dst, a ^ b);
+            }
+            Inst::ShiftRightArithImm(dst, src, imm) => {
+                let a = i32::from_le_bytes(self.regs.get(src).to_le_bytes());
+                let b = imm.0;
+                let res = u32::from_le_bytes(a.wrapping_shr(b).to_le_bytes());
+                self.regs.set(dst, res);
+            }
+            Inst::ShiftRightLogicalImm(dst, src, imm) => {
+                let a = self.regs.get(src);
+                let b = imm.0;
+                self.regs.set(dst, a.wrapping_shr(b));
             }
             Inst::ShiftLeftLogicalImm(dst, src, imm) => {
                 let a = self.regs.get(src);
@@ -166,6 +194,14 @@ impl Emulated {
                 }
             }
             Inst::BranchIfGreaterEqual(src0, src1, tgt) => {
+                let a = i32::from_le_bytes(self.regs.get(src0).to_le_bytes());
+                let b = i32::from_le_bytes(self.regs.get(src1).to_le_bytes());
+                if a >= b {
+                    self.pc = tgt;
+                    advance_pc = false;
+                }
+            }
+            Inst::BranchIfGreaterEqualU(src0, src1, tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a >= b {
@@ -174,6 +210,14 @@ impl Emulated {
                 }
             }
             Inst::BranchIfLess(src0, src1, tgt) => {
+                let a = i32::from_le_bytes(self.regs.get(src0).to_le_bytes());
+                let b = i32::from_le_bytes(self.regs.get(src1).to_le_bytes());
+                if a < b {
+                    self.pc = tgt;
+                    advance_pc = false;
+                }
+            }
+            Inst::BranchIfLessU(src0, src1, tgt) => {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a < b {
@@ -181,10 +225,25 @@ impl Emulated {
                     advance_pc = false;
                 }
             }
+            Inst::SetLessThanU(dst, src0, src1) => {
+                let a = self.regs.get(src0);
+                let b = self.regs.get(src1);
+                let val = if a < b { 1 } else { 0 };
+                self.regs.set(dst, val);
+            }
+            Inst::SetLessThanImm(dst, src, imm) => {
+                let r = i32::from_le_bytes(self.regs.get(src).to_le_bytes());
+                let imm = i32::from_le_bytes(imm.0.to_le_bytes());
+                let val = if r < imm { 1 } else { 0 };
+                self.regs.set(dst, val);
+            }
             Inst::SetLessThanImmU(dst, src, imm) => {
                 let r = self.regs.get(src);
                 let val = if r < imm.0 { 1 } else { 0 };
                 self.regs.set(dst, val);
+            }
+            Inst::LoadUpperImm(dst, imm) => {
+                self.regs.set(dst, imm.0 << 12);
             }
             Inst::Halt => unreachable!(),
             _ => unimplemented!("{:?}", *next_inst),

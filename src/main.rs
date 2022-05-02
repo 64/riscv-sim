@@ -54,9 +54,9 @@ fn main() {
     // let res = emulated::Emulated::new(prog, initial_regs, mem).exec_all();
     let res = out_of_order::OutOfOrder::new(prog, initial_regs, mem).exec_all();
 
-    use std::io::Write;
-    let mut f = std::fs::File::create("/tmp/mem.txt").expect("Unable to create file");
-    writeln!(f, "{:#?}", res.mem).unwrap();
+    // use std::io::Write;
+    // let mut f = std::fs::File::create("/tmp/mem.txt").expect("Unable to create file");
+    // writeln!(f, "{:#?}", res.mem).unwrap();
 
     println!("{res}");
 }

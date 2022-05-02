@@ -105,7 +105,12 @@ impl RegFile {
     }
 
     pub fn was_predicted_taken(&self, branch: Tag) -> bool {
-        match self.branch_info.get(&branch).expect("no branch").info {
+        match self
+            .branch_info
+            .get(&branch)
+            .expect("no branch info for direct branch")
+            .info
+        {
             BranchType::Direct { taken, .. } => taken,
             _ => unreachable!(),
         }

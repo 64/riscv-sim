@@ -40,6 +40,7 @@ pub struct Stats {
     pub lsq_stalls: u64,
     pub phys_reg_stalls: u64,
     pub fetch_stalls: u64,
+    pub macro_ops_fused: u64,
     pub l1_miss: u64,
     pub l2_miss: u64,
     pub l3_miss: u64,
@@ -141,6 +142,14 @@ impl fmt::Display for ExecResult {
         }
         if self.stats.l3_miss != 0 {
             writeln!(f, "         L3 cache misses: {}", self.stats.l3_miss)?;
+        }
+
+        if self.stats.macro_ops_fused != 0 {
+            writeln!(
+                f,
+                "         Macro-ops fused: {}",
+                self.stats.macro_ops_fused
+            )?;
         }
 
         writeln!(f, "    Instructions retired: {}", self.stats.insts_retired)?;

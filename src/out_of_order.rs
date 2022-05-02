@@ -91,6 +91,7 @@ pub struct OutOfOrder {
 }
 
 const PIPE_WIDTH: u64 = 4;
+const USE_FUSION: bool = true;
 
 impl Cpu for OutOfOrder {
     fn new(prog: Program, regs: RegSet, mem: MainMemory) -> Self {
@@ -179,7 +180,10 @@ impl Cpu for OutOfOrder {
                 std::io::stdin().read_line(&mut String::new()).unwrap();
             }
 
-            debug_assert!(self.stats.cycles_taken < 100_000, "infinite loop detected");
+            debug_assert!(
+                self.stats.cycles_taken < 1_000_000,
+                "infinite loop detected"
+            );
         }
     }
 }
@@ -199,42 +203,77 @@ impl OutOfOrder {
     // TODO: narrow
     fn fetch_decode_one(&mut self, pc: AbsPc, tag: Tag) -> stages::narrow::FetchDecode {
         let inst = self.prog.fetch(pc).cloned().unwrap_or(Inst::Halt);
+        let next_inst = self
+            .prog
+            .fetch(pc + INST_SIZE)
+            .cloned()
+            .unwrap_or(Inst::Halt);
 
-        // Branch prediction
-        let next_pc = match &inst {
-            Inst::BranchIfEqual(_, _, tgt)
-            | Inst::BranchIfNotEqual(_, _, tgt)
-            | Inst::BranchIfLess(_, _, tgt)
-            | Inst::BranchIfGreaterEqual(_, _, tgt) => {
-                let taken_pc = *tgt;
-                let not_taken_pc = pc + INST_SIZE;
-                let predict_taken = self.branch_predictor.predict_direct(pc, taken_pc);
-
-                self.reg_file
-                    .begin_predict_direct(tag, predict_taken, taken_pc, not_taken_pc);
-
-                if predict_taken {
-                    Some(taken_pc)
-                } else {
-                    Some(not_taken_pc)
+        let fused = if USE_FUSION {
+            match (&inst, &next_inst) {
+                (Inst::Add(rd1, rs1, rs2), Inst::LoadByteU(rd2, mem_ref))
+                    if rd1 == rd2 && *rd2 == mem_ref.base =>
+                {
+                    Some(Inst::IndexedLoadByteU(*rd2, *rs1, *rs2, mem_ref.offset))
                 }
+                (Inst::ShiftLeftLogicalImm(rd1, rs1, imm), Inst::Add(rd2, rs2, rs3))
+                    if rd1 == rd2 && rd2 == rs2 =>
+                {
+                    Some(Inst::EffectiveAddress(*rd2, *rs1, *rs3, *imm))
+                }
+                _ => None,
             }
-            Inst::JumpAndLink(_, tgt) => {
-                self.pc_map.insert(tag, pc);
-                Some(*tgt)
-            }
-            Inst::JumpAndLinkRegister(_, _, _) => {
-                let predicted_addr = self.branch_predictor.predict_indirect(pc);
-                self.reg_file
-                    .begin_predict_indirect(tag, predicted_addr, pc);
-                predicted_addr
-            }
-            _ => Some(pc + INST_SIZE),
+        } else {
+            None
         };
 
-        stages::narrow::FetchDecode {
-            inst: Tagged { inst, tag },
-            next_pc,
+        if let Some(fused) = fused {
+            stages::narrow::FetchDecode {
+                inst: Tagged { inst: fused, tag },
+                next_pc: Some(pc + 2 * INST_SIZE),
+            }
+        } else {
+            // Branch prediction
+            let next_pc = match &inst {
+                Inst::BranchIfEqual(_, _, tgt)
+                | Inst::BranchIfNotEqual(_, _, tgt)
+                | Inst::BranchIfLess(_, _, tgt)
+                | Inst::BranchIfLessU(_, _, tgt)
+                | Inst::BranchIfGreaterEqualU(_, _, tgt)
+                | Inst::BranchIfGreaterEqual(_, _, tgt) => {
+                    let taken_pc = *tgt;
+                    let not_taken_pc = pc + INST_SIZE;
+                    let predict_taken = self.branch_predictor.predict_direct(pc, taken_pc);
+
+                    self.reg_file
+                        .begin_predict_direct(tag, predict_taken, taken_pc, not_taken_pc);
+
+                    if predict_taken {
+                        Some(taken_pc)
+                    } else {
+                        Some(not_taken_pc)
+                    }
+                }
+                Inst::JumpAndLink(_, tgt) => {
+                    self.pc_map.insert(tag, pc);
+                    Some(*tgt)
+                }
+                Inst::JumpAndLinkRegister(_, _, _) => {
+                    let predicted_addr = self.branch_predictor.predict_indirect(pc);
+                    self.reg_file
+                        .begin_predict_indirect(tag, predicted_addr, pc);
+                    predicted_addr
+                }
+                _ => {
+                    debug_assert!(!inst.is_branch());
+                    Some(pc + INST_SIZE)
+                }
+            };
+
+            stages::narrow::FetchDecode {
+                inst: Tagged { inst, tag },
+                next_pc,
+            }
         }
     }
 
@@ -424,17 +463,26 @@ impl OutOfOrder {
 
                 match &inst {
                     Inst::Add(dst, _, _)
-                    | Inst::And(dst, _, _)
-                    | Inst::Or(dst, _, _)
+                    | Inst::AddImm(dst, _, _)
                     | Inst::Sub(dst, _, _)
                     | Inst::Mul(dst, _, _)
                     | Inst::Rem(dst, _, _)
                     | Inst::DivU(dst, _, _)
-                    | Inst::AddImm(dst, _, _)
+                    | Inst::And(dst, _, _)
                     | Inst::AndImm(dst, _, _)
+                    | Inst::Or(dst, _, _)
+                    | Inst::OrImm(dst, _, _)
+                    | Inst::Xor(dst, _, _)
+                    | Inst::XorImm(dst, _, _)
+                    | Inst::LoadUpperImm(dst, _)
+                    | Inst::SetLessThanU(dst, _, _)
+                    | Inst::SetLessThanImm(dst, _, _)
                     | Inst::SetLessThanImmU(dst, _, _)
                     | Inst::ShiftLeftLogicalImm(dst, _, _)
                     | Inst::ShiftRightArithImm(dst, _, _)
+                    | Inst::ShiftRightLogicalImm(dst, _, _)
+                    | Inst::EffectiveAddress(dst, _, _, _)
+                    | Inst::IndexedLoadByteU(dst, _, _, _)
                     | Inst::LoadWord(dst, _)
                     | Inst::LoadHalfWord(dst, _)
                     | Inst::LoadByte(dst, _)
@@ -445,7 +493,9 @@ impl OutOfOrder {
                     }
                     Inst::BranchIfEqual(_, _, _)
                     | Inst::BranchIfLess(_, _, _)
+                    | Inst::BranchIfLessU(_, _, _)
                     | Inst::BranchIfNotEqual(_, _, _)
+                    | Inst::BranchIfGreaterEqualU(_, _, _)
                     | Inst::BranchIfGreaterEqual(_, _, _) => {
                         let taken = result.val == 1;
                         let predicted_taken = self.reg_file.was_predicted_taken(tag);
@@ -504,7 +554,7 @@ impl OutOfOrder {
                     | Inst::StoreHalfWord(_, _)
                     | Inst::StoreByte(_, _)
                     | Inst::Halt => (),
-                    _ => unimplemented!("{:?}", inst),
+                    // _ => unimplemented!("{:?}", inst),
                 };
 
                 self.rob.mark_complete(tag);
@@ -537,19 +587,31 @@ impl OutOfOrder {
 
             match inst {
                 Inst::Add(dst, _, _)
-                | Inst::And(dst, _, _)
-                | Inst::Or(dst, _, _)
+                | Inst::AddImm(dst, _, _)
                 | Inst::Sub(dst, _, _)
                 | Inst::Mul(dst, _, _)
                 | Inst::Rem(dst, _, _)
                 | Inst::DivU(dst, _, _)
-                | Inst::AddImm(dst, _, _)
+                | Inst::And(dst, _, _)
                 | Inst::AndImm(dst, _, _)
+                | Inst::Or(dst, _, _)
+                | Inst::OrImm(dst, _, _)
+                | Inst::Xor(dst, _, _)
+                | Inst::XorImm(dst, _, _)
+                | Inst::ShiftRightLogicalImm(dst, _, _)
+                | Inst::ShiftRightArithImm(dst, _, _)
                 | Inst::ShiftLeftLogicalImm(dst, _, _)
+                | Inst::SetLessThanU(dst, _, _)
+                | Inst::SetLessThanImm(dst, _, _)
                 | Inst::SetLessThanImmU(dst, _, _)
                 | Inst::JumpAndLink(dst, _)
                 | Inst::JumpAndLinkRegister(dst, _, _)
+                | Inst::EffectiveAddress(dst, _, _, _)
+                | Inst::IndexedLoadByteU(dst, _, _, _)
+                | Inst::LoadUpperImm(dst, _)
                 | Inst::LoadByteU(dst, _)
+                | Inst::LoadByte(dst, _)
+                | Inst::LoadHalfWord(dst, _)
                 | Inst::LoadWord(dst, _) => {
                     if dst != ArchReg::Zero {
                         self.reg_file.release_phys(tag);
@@ -564,12 +626,18 @@ impl OutOfOrder {
                 }
                 Inst::BranchIfEqual(_, _, _)
                 | Inst::BranchIfLess(_, _, _)
+                | Inst::BranchIfLessU(_, _, _)
                 | Inst::BranchIfNotEqual(_, _, _)
-                | Inst::BranchIfGreaterEqual(_, _, _) => (),
+                | Inst::BranchIfGreaterEqualU(_, _, _) => (),
+                Inst::BranchIfGreaterEqual(_, _, _) => (),
                 _ => unimplemented!("{:?}", inst),
             }
 
             self.stats.insts_retired += 1;
+
+            if inst.is_fused() {
+                self.stats.macro_ops_fused += 1;
+            }
         }
 
         stages::Commit { should_halt: false }

@@ -126,26 +126,31 @@ mod cosim {
     use super::*;
     use aca::regs::RegSet;
 
-    fn qoi_decode<C: Cpu>(path: &str) -> MainMemory {
-        let mut mem = MainMemory::new();
+    fn qoi_decode<C: Cpu>(path: &str) -> (MainMemory, MainMemory) {
         let load_addr = 1000;
         let data = std::fs::read(path).expect("could not open file");
-        mem.copy_from_slice(&data, Addr(load_addr));
 
-        parse_and_exec::<C>(
-            "qoi_decode",
-            RegSet::from([(ArchReg::A0, load_addr), (ArchReg::A1, data.len() as u32)]),
-            mem,
-        )
-        .mem
+        let run = |name| {
+            let mut mem = MainMemory::new();
+            mem.copy_from_slice(&data, Addr(load_addr));
+            parse_and_exec::<C>(
+                name,
+                RegSet::from([(ArchReg::A0, load_addr), (ArchReg::A1, data.len() as u32)]),
+                mem,
+            )
+            .mem
+        };
+
+        (run("qoi_decode"), run("qoi_decode_clang"))
     }
 
     #[test]
     fn test_qoi_decode() {
         // let path = "data/riscv-300x300.qoi";
         let path = "data/test-8x8.qoi";
-        let a = qoi_decode::<Emulated>(path);
-        let b = qoi_decode::<OutOfOrder>(path);
-        assert!(a == b, "qoi decode results differ!");
+        let (a_gcc, a_clang) = qoi_decode::<Emulated>(path);
+        let (b_gcc, b_clang) = qoi_decode::<OutOfOrder>(path);
+        assert!(a_gcc == b_gcc, "qoi (gcc) decode results differ!");
+        assert!(a_clang == b_clang, "qoi (clang) decode results differ!");
     }
 }

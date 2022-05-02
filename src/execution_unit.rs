@@ -109,11 +109,14 @@ impl ExecutionUnit {
     fn compute_result(inst: &ReadyInst, mem: &mut MemoryHierarchy) -> EuResult {
         let val = match inst {
             Inst::Add(_, src0, src1) => src0.wrapping_add(*src1),
-            Inst::And(_, src0, src1) => src0 & *src1,
-            Inst::Or(_, src0, src1) => src0 | *src1,
-            Inst::Sub(_, src0, src1) => src0.wrapping_sub(*src1),
             Inst::AddImm(_, src, imm) => src.wrapping_add(imm.0),
+            Inst::And(_, src0, src1) => src0 & *src1,
             Inst::AndImm(_, src, imm) => src & imm.0,
+            Inst::Or(_, src0, src1) => src0 | *src1,
+            Inst::OrImm(_, src, imm) => src | imm.0,
+            Inst::Xor(_, src0, src1) => src0 ^ *src1,
+            Inst::XorImm(_, src, imm) => src ^ imm.0,
+            Inst::Sub(_, src0, src1) => src0.wrapping_sub(*src1),
             Inst::Mul(_, src0, src1) => src0.wrapping_mul(*src1),
             Inst::Rem(_, src0, src1) => {
                 if *src1 == 0 {
@@ -129,8 +132,23 @@ impl ExecutionUnit {
                     *src0 / *src1
                 }
             }
+            Inst::EffectiveAddress(_, src1, src2, imm) => {
+                src1.wrapping_add(src2.wrapping_shl(imm.0))
+            }
             Inst::JumpAndLinkRegister(_, src, imm) => src.wrapping_add(imm.0),
+            Inst::ShiftRightArithImm(_, src, imm) => {
+                let a = i32::from_le_bytes(src.to_le_bytes());
+                u32::from_le_bytes(a.wrapping_shr(imm.0).to_le_bytes())
+            }
+            Inst::ShiftRightLogicalImm(_, src, imm) => src.wrapping_shr(imm.0),
             Inst::ShiftLeftLogicalImm(_, src, imm) => src.wrapping_shl(imm.0),
+            Inst::SetLessThanU(_, src0, src1) => (src0 < src1).into(),
+            Inst::SetLessThanImm(_, src, imm) => {
+                let a = i32::from_le_bytes(src.to_le_bytes());
+                let b = i32::from_le_bytes(imm.0.to_le_bytes());
+                (a < b).into()
+            }
+            Inst::LoadUpperImm(_, imm) => imm.0 << 12,
             Inst::SetLessThanImmU(_, src, imm) => (src < &imm.0).into(),
             Inst::JumpAndLink(_, imm) => imm.0,
             Inst::BranchIfEqual(src0, src1, _) => (src0 == src1).into(),
@@ -148,8 +166,11 @@ impl ExecutionUnit {
             }
             Inst::BranchIfLessU(src0, src1, _) => (src0 < src1).into(),
             Inst::Halt => 0,
-            Inst::LoadByteU(_, src) => mem.main.readbu(src.compute_addr()),
-            Inst::LoadWord(_, src) => mem.main.readw(src.compute_addr()),
+            Inst::IndexedLoadByteU(_, _, _, _) | Inst::LoadByteU(_, _) => {
+                mem.main.readbu(inst.access_addr())
+            }
+            Inst::LoadByte(_, _) => mem.main.readb(inst.access_addr()),
+            Inst::LoadWord(_, _) => mem.main.readw(inst.access_addr()),
             x if x.is_store() => 0, // Stores are handled by LSQ upon retire.
             _ => unimplemented!("{:?}", inst),
         };

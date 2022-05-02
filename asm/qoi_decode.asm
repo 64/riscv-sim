@@ -449,7 +449,7 @@ qoi_decode:
         j       .L10
 
 q_memset:
-        beq     a2,zero,.L2
+        beq     a2,zero,.L48
         add     a2,a0,a2
         sb      a1,0(a2)
 .L48:
