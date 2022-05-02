@@ -14,8 +14,21 @@ pub enum CpuState {
 }
 
 #[derive(Debug, Clone)]
+pub struct Start {
+    time: Instant,
+}
+
+impl Default for Start {
+    fn default() -> Start {
+        Start {
+            time: Instant::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct Stats {
-    pub start: Instant,
+    pub start: Start,
     pub cycles_taken: u64,
     pub insts_retired: u64,
     pub direct_mispredicts: u64,
@@ -28,6 +41,9 @@ pub struct Stats {
     pub l1_miss: u64,
     pub l2_miss: u64,
     pub l3_miss: u64,
+    pub l1_hits: u64,
+    pub l2_hits: u64,
+    pub l3_hits: u64,
     pub eu_util: Vec<(EuType, f32)>,
 }
 
@@ -42,27 +58,6 @@ pub trait Cpu {
     fn new(prog: Program, in_regs: RegSet, in_mem: MainMemory) -> Self;
 
     fn exec_all(self) -> ExecResult;
-}
-
-impl Default for Stats {
-    fn default() -> Self {
-        Self {
-            cycles_taken: 0,
-            insts_retired: 0,
-            direct_mispredicts: 0,
-            indirect_mispredicts: 0,
-            rob_stalls: 0,
-            reservation_station_stalls: 0,
-            lsq_stalls: 0,
-            phys_reg_stalls: 0,
-            fetch_stalls: 0,
-            l1_miss: 0,
-            l2_miss: 0,
-            l3_miss: 0,
-            eu_util: Vec::new(),
-            start: Instant::now(),
-        }
-    }
 }
 
 impl Stats {
@@ -126,11 +121,20 @@ impl fmt::Display for ExecResult {
                 self.stats.indirect_mispredicts
             )?;
         }
+        if self.stats.l1_hits != 0 {
+            writeln!(f, "           L1 cache hits: {}", self.stats.l1_hits)?;
+        }
         if self.stats.l1_miss != 0 {
             writeln!(f, "         L1 cache misses: {}", self.stats.l1_miss)?;
         }
+        if self.stats.l2_hits != 0 {
+            writeln!(f, "           L2 cache hits: {}", self.stats.l2_hits)?;
+        }
         if self.stats.l2_miss != 0 {
             writeln!(f, "         L2 cache misses: {}", self.stats.l2_miss)?;
+        }
+        if self.stats.l3_hits != 0 {
+            writeln!(f, "           L3 cache hits: {}", self.stats.l3_hits)?;
         }
         if self.stats.l3_miss != 0 {
             writeln!(f, "         L3 cache misses: {}", self.stats.l3_miss)?;
@@ -146,7 +150,7 @@ impl fmt::Display for ExecResult {
         writeln!(
             f,
             "  Simulator time elapsed: {:.2}s",
-            self.stats.start.elapsed().as_secs_f32()
+            self.stats.start.time.elapsed().as_secs_f32()
         )?;
 
         if self.stats.eu_util.len() > 0 {

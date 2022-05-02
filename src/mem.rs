@@ -72,17 +72,20 @@ impl MemoryHierarchy {
                     // TODO: WE should just implement load/store forwarding
                     L1_LATENCY // + (p.end - p.current)
                 } else if self.l1.get(&addr).is_some() {
+                    stats.l1_hits += 1;
                     L1_LATENCY
                 } else if self.l2.get(&addr).is_some() {
-                    stats.l1_miss += 1;
+                    // stats.l1_miss += 1;
+                    stats.l2_hits += 1;
                     L2_LATENCY
                 } else if self.l3.get(&addr).is_some() {
-                    stats.l1_miss += 1;
+                    // stats.l1_miss += 1;
                     stats.l2_miss += 1;
+                    stats.l3_hits += 1;
                     L3_LATENCY
                 } else {
-                    stats.l1_miss += 1;
-                    stats.l2_miss += 1;
+                    // stats.l1_miss += 1;
+                    // stats.l2_miss += 1;
                     stats.l3_miss += 1;
                     DRAM_LATENCY
                 };
