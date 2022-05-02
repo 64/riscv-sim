@@ -292,12 +292,14 @@ impl OutOfOrder {
                 }
                 Inst::JumpAndLink(_, tgt) => {
                     // println!("jal {:?} at {:?}", inst, self.stats.insts_retired);
+                    let _ = self.branch_predictor.predict_indirect(&inst, pc); // Update RAS
+
                     self.pc_map.insert(tag, pc);
                     Some(*tgt)
                 }
                 Inst::JumpAndLinkRegister(_, _, _) => {
                     // println!("begin predict indirect {:?} at {:?}", inst, self.stats.insts_retired);
-                    let predicted_addr = self.branch_predictor.predict_indirect(pc);
+                    let predicted_addr = self.branch_predictor.predict_indirect(&inst, pc);
                     self.reg_file
                         .begin_predict_indirect(tag, predicted_addr, pc);
                     predicted_addr
