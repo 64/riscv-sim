@@ -31,11 +31,10 @@ fn main() {
 
     let mut mem = MainMemory::new();
 
-    let a0 = std::env::args().nth(2).unwrap_or("".to_string());
-
-    let a0 = if let Some(x) = a0.parse::<u32>().ok() {
+    let a0 = std::env::args().nth(2).unwrap_or_else(|| "".to_string());
+    let a0 = if let Ok(x) = a0.parse::<u32>() {
         x
-    } else if let Some(path) = a0.parse::<PathBuf>().ok() {
+    } else if let Ok(path) = a0.parse::<PathBuf>() {
         println!("Loading file: {}", path.display());
 
         let load_addr = 1000;

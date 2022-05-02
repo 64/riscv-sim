@@ -33,7 +33,7 @@ impl BranchTargetBuffer {
         self.cache
             .get(&pc)
             .cloned()
-            .map(|ent| WithLruTimestamp::into_inner(ent))
+            .map(WithLruTimestamp::into_inner)
     }
 
     pub fn add_entry(&mut self, pc: AbsPc, target: AbsPc) {

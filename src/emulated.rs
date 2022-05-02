@@ -139,7 +139,7 @@ impl Emulated {
             }
             Inst::JumpAndLink(dst, tgt) => {
                 self.regs.set(dst, (self.pc + INST_SIZE).0);
-                self.pc = tgt.into();
+                self.pc = tgt;
                 advance_pc = false;
             }
             Inst::JumpAndLinkRegister(dst, src, off) => {
@@ -153,7 +153,7 @@ impl Emulated {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a == b {
-                    self.pc = tgt.into();
+                    self.pc = tgt;
                     advance_pc = false;
                 }
             }
@@ -161,7 +161,7 @@ impl Emulated {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a != b {
-                    self.pc = tgt.into();
+                    self.pc = tgt;
                     advance_pc = false;
                 }
             }
@@ -169,7 +169,7 @@ impl Emulated {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a >= b {
-                    self.pc = tgt.into();
+                    self.pc = tgt;
                     advance_pc = false;
                 }
             }
@@ -177,7 +177,7 @@ impl Emulated {
                 let a = self.regs.get(src0);
                 let b = self.regs.get(src1);
                 if a < b {
-                    self.pc = tgt.into();
+                    self.pc = tgt;
                     advance_pc = false;
                 }
             }

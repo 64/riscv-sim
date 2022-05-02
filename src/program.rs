@@ -48,7 +48,11 @@ impl FromStr for Program {
         let insts = insts
             .into_iter()
             .map(|inst| {
-                inst.map_jumps(|tgt| *labels.get(&tgt).expect(&format!("unknown label {:?}", tgt)))
+                inst.map_jumps(|tgt| {
+                    *labels
+                        .get(&tgt)
+                        .unwrap_or_else(|| panic!("unknown label {:?}", tgt))
+                })
             })
             .collect();
 

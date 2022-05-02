@@ -120,7 +120,8 @@ impl fmt::Display for ExecResult {
             writeln!(
                 f,
                 "    Indirect mispredicts: {:.2}%",
-                100.0 * self.stats.indirect_mispredicts as f32 / self.stats.indirect_predicts as f32,
+                100.0 * self.stats.indirect_mispredicts as f32
+                    / self.stats.indirect_predicts as f32,
             )?;
         }
         if self.stats.l1_hits != 0 {
@@ -153,10 +154,11 @@ impl fmt::Display for ExecResult {
         writeln!(
             f,
             "  Simulator time elapsed: {:.2}s ({:.0} KHz)",
-            elapsed, self.stats.cycles_taken as f32 / elapsed / 1_000.0
+            elapsed,
+            self.stats.cycles_taken as f32 / elapsed / 1_000.0
         )?;
 
-        if self.stats.eu_util.len() > 0 {
+        if !self.stats.eu_util.is_empty() {
             writeln!(f, "          EU utilisation:")?;
             for (eu_type, util) in &self.stats.eu_util {
                 if *eu_type != EuType::Special {
