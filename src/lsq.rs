@@ -33,7 +33,7 @@ pub struct LoadStoreQueue {
     stores: Queue<Store>,
 }
 
-pub const MEM_SPECULATION: bool = false;
+pub const MEM_SPECULATION: bool = true;
 
 impl Store {
     pub fn new(tagged: Tagged<RenamedInst>) -> Self {

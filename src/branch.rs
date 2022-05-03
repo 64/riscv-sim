@@ -58,6 +58,7 @@ impl BranchPredictor {
             // Ret
             self.ras.pop()
             // println!("Return from {:?} to {:?}", pc, val);
+            // self.btb.get(&pc).copied()
         } else {
             self.btb.get(&pc).copied()
         }

@@ -135,8 +135,8 @@ mod t {
         run(4);
         run(8);
         run(9);
-        // run(50);
-        // run(100);
+        run(50);
+        run(100);
     }
 
     #[test]
