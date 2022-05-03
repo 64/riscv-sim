@@ -12,20 +12,20 @@ const DRAM_CAPACITY_BYTES: usize = 1_024_000;
 
 pub const STACK_TOP: usize = DRAM_CAPACITY_BYTES - 16_000;
 
-// const L1_LATENCY: u64 = 5;
-// const L2_LATENCY: u64 = 20;
-// const L3_LATENCY: u64 = 40;
-// const DRAM_LATENCY: u64 = 400;
+const L1_LATENCY: u64 = 5;
+const L2_LATENCY: u64 = 20;
+const L3_LATENCY: u64 = 40;
+const DRAM_LATENCY: u64 = 400;
 
 // const L1_LATENCY: u64 = 3;
 // const L2_LATENCY: u64 = 3;
 // const L3_LATENCY: u64 = 3;
 // const DRAM_LATENCY: u64 = 3;
 
-const L1_LATENCY: u64 = 1;
-const L2_LATENCY: u64 = 1;
-const L3_LATENCY: u64 = 1;
-const DRAM_LATENCY: u64 = 1;
+// const L1_LATENCY: u64 = 1;
+// const L2_LATENCY: u64 = 1;
+// const L3_LATENCY: u64 = 1;
+// const DRAM_LATENCY: u64 = 1;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MainMemory {
@@ -65,7 +65,7 @@ impl MemoryHierarchy {
             Some(p) => p.current >= p.end,
             None => {
                 let addr = addr.to_cache_line();
-                let latency = if let Some(_p) = self
+                let latency = if let Some(p) = self
                     .pending_fetches
                     .iter()
                     .filter(|p| p.addr == addr)
@@ -79,7 +79,7 @@ impl MemoryHierarchy {
                     // dbg!(tag);
                     // dbg!(p);
                     // TODO: WE should just implement load/store forwarding
-                    L1_LATENCY // + (p.end - p.current)
+                    L1_LATENCY + (p.end.saturating_sub(p.current))
                 } else if self.l1.get(&addr).is_some() {
                     stats.l1_hits += 1;
                     L1_LATENCY

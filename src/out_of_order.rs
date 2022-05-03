@@ -55,6 +55,11 @@ mod stages {
         }
 
         #[derive(Debug, Clone, Default)]
+        pub struct Issue {
+            pub next_fetch: Option<AbsPc>,
+        }
+
+        #[derive(Debug, Clone, Default)]
         pub struct Writeback {
             pub insts: Vec<Tagged<ExecutedInst>>,
             pub next_fetch: Option<AbsPc>,
@@ -124,8 +129,6 @@ impl Cpu for OutOfOrder {
 
             let commit = self.stage_commit(&pipe);
             let writeback = self.stage_writeback(&pipe);
-            self.stage_issue(&pipe);
-            self.stage_execute(&pipe);
 
             if commit.should_halt {
                 // assert!(self.reg_file.is_prrt_empty());
@@ -138,6 +141,9 @@ impl Cpu for OutOfOrder {
             }
 
             if let Some(next_pc) = writeback.next_fetch {
+                // let issue = self.stage_issue(&pipe);
+                // self.stage_execute(&pipe);
+
                 pipe = Pipeline {
                     fetch_decode: stages::wide::FetchDecode {
                         insts: Vec::new(),
@@ -149,24 +155,41 @@ impl Cpu for OutOfOrder {
                     commit,
                 };
             } else {
-                let rename = self.stage_rename(&pipe);
+                let issue = self.stage_issue(&pipe);
 
-                if let Some(nxt) = &rename.next_fetch_decode {
+                if let Some(next_pc) = issue.next_fetch {
+                    // println!("JUMPING TO {:?}", next_pc);
                     pipe = Pipeline {
-                        fetch_decode: nxt.clone(),
-                        rename,
+                        fetch_decode: stages::wide::FetchDecode {
+                            insts: Vec::new(),
+                            next_pcs: vec![next_pc],
+                            stalled: false,
+                        },
+                        rename: stages::wide::Rename::default(),
                         writeback,
                         commit,
                     };
                 } else {
-                    let fetch_decode = self.stage_fetch_decode(&pipe);
+                    self.stage_execute(&pipe);
+                    let rename = self.stage_rename(&pipe);
 
-                    pipe = Pipeline {
-                        fetch_decode,
-                        rename,
-                        writeback,
-                        commit,
-                    };
+                    if let Some(nxt) = &rename.next_fetch_decode {
+                        pipe = Pipeline {
+                            fetch_decode: nxt.clone(),
+                            rename,
+                            writeback,
+                            commit,
+                        };
+                    } else {
+                        let fetch_decode = self.stage_fetch_decode(&pipe);
+
+                        pipe = Pipeline {
+                            fetch_decode,
+                            rename,
+                            writeback,
+                            commit,
+                        };
+                    }
                 }
             }
 
@@ -189,22 +212,25 @@ impl Cpu for OutOfOrder {
 impl OutOfOrder {
     #[allow(dead_code, unused)]
     fn dump(&self, pipe: &Pipeline) {
-        dbg!(&self.lsq);
+        // dbg!(&self.lsq);
         // dbg!(&self.reg_file);
         // dbg!(&self.reservation_station);
         // dbg!(&self.rob);
-        // dbg!(&self.execution_units);
+        dbg!(&self.execution_units);
         // dbg!(pipe);
         // dbg!(self.stats.cycles_taken);
 
-        // for next_inst in pipe.fetch_decode.insts.iter().map(|t| &t.inst) {
-        //     println!("{:?}", next_inst);
-        //     use std::io::Write;
-        //     std::io::stdout().flush().unwrap();
-        // }
+        for Tagged {
+            inst: next_inst,
+            tag,
+        } in pipe.fetch_decode.insts.iter()
+        {
+            println!("{:?} @ {:?}", next_inst, tag);
+            use std::io::Write;
+            std::io::stdout().flush().unwrap();
+        }
     }
 
-    // TODO: narrow
     fn fetch_decode_one(&mut self, pc: AbsPc, tag: Tag) -> stages::narrow::FetchDecode {
         let inst = self.prog.fetch(pc).cloned().unwrap_or(Inst::Halt);
         let next_inst = self
@@ -263,6 +289,10 @@ impl OutOfOrder {
         };
 
         if let Some(fused) = fused {
+            if fused.is_load() {
+                self.pc_map.insert(tag, pc);
+            }
+
             stages::narrow::FetchDecode {
                 inst: Tagged { inst: fused, tag },
                 next_pc: Some(pc + 2 * INST_SIZE),
@@ -306,6 +336,12 @@ impl OutOfOrder {
                 }
                 _ => {
                     debug_assert!(!inst.is_branch());
+
+                    if inst.is_load() {
+                        self.pc_map.insert(tag, pc);
+                        self.reg_file.begin_predict_mem(tag, pc);
+                    }
+
                     Some(pc + INST_SIZE)
                 }
             };
@@ -442,14 +478,43 @@ impl OutOfOrder {
         }
     }
 
-    fn stage_issue(&mut self, _pipe: &Pipeline) {
+    fn stage_issue(&mut self, _pipe: &Pipeline) -> stages::wide::Issue {
         let mut remove_tags = vec![];
+        let mut kill_tags = Vec::new();
+        let mut reinsert_insts = Vec::new();
 
         for (tag, ready_inst) in self.reservation_station.get_ready(&self.reg_file) {
-            if ready_inst.is_load() && !self.lsq.can_execute_load(*tag, ready_inst.access_range()) {
+            if ready_inst.is_load()
+                && !self.lsq.can_execute_load(
+                    *tag,
+                    *self
+                        .pc_map
+                        .get(tag)
+                        .unwrap_or_else(|| panic!("no tag {:?}", tag)),
+                    ready_inst.access_range(),
+                    &mut self.reg_file,
+                )
+            {
                 continue;
             } else if ready_inst.is_store() {
-                self.lsq.store_addr_known(*tag, ready_inst.access_range());
+                let (eu_kills, mispredicts) =
+                    self.lsq
+                        .store_addr_known(*tag, ready_inst.access_range(), &mut self.reg_file);
+
+                for tag in eu_kills {
+                    // Kill it from the EUs (but this isn't a misprediction)
+                    for eu in &mut self.execution_units {
+                        if eu.eu_type == EuType::LoadStore {
+                            self.lsq.kill_inflight(tag);
+                            let killed = eu.kill_specific(tag);
+                            reinsert_insts.push(killed);
+                        }
+                    }
+                }
+
+                // dbg!(&mispredicts);
+                // assert!(mispredicts.len() <= 1);
+                kill_tags = mispredicts;
             }
 
             if let Some(eu) = self
@@ -457,14 +522,43 @@ impl OutOfOrder {
                 .iter_mut()
                 .find(|eu| eu.can_execute(ready_inst))
             {
+                if ready_inst.is_load() {
+                    self.lsq.begin_execute_load(*tag);
+                }
+
                 eu.begin_execute(ready_inst.clone(), *tag);
                 remove_tags.push(*tag);
+            }
+
+            if !kill_tags.is_empty() {
+                break;
             }
         }
 
         for tag in remove_tags {
             self.reservation_station.pop_ready(tag);
         }
+
+        for tagged in reinsert_insts {
+            self.reservation_station
+                .insert_ready(tagged.tag, tagged.inst);
+        }
+
+        // we should roll back to the earliest mis-speculation
+        // kill_tags.iter().filter_map(|t| self.reg_file.end_predict_mem(*t, false))
+        kill_tags.sort();
+
+        let mut next_fetch = None;
+        for tag in kill_tags.iter().rev() {
+            next_fetch = self.reg_file.end_predict_mem(*tag, false);
+        }
+
+        for tag in kill_tags {
+            // println!("KILLING TAGS AFTER {:?}", tag);
+            self.kill_tags_after(Tag(tag.0 - 1));
+        }
+
+        stages::wide::Issue { next_fetch }
     }
 
     // Advance execution of all the execution units.
@@ -533,12 +627,13 @@ impl OutOfOrder {
                     | Inst::LoadHalfWord(dst, _)
                     | Inst::LoadByte(dst, _)
                     | Inst::LoadByteU(dst, _) => {
-                        if dst.arch != ArchReg::Zero {
-                            self.reg_file.set_phys_active(dst.phys, result.val);
+                        if inst.is_load() {
+                            self.lsq.writeback_load(tag);
+                            self.pc_map.remove(&tag);
                         }
 
-                        if inst.is_load() {
-                            self.lsq.load_complete(tag);
+                        if dst.arch != ArchReg::Zero {
+                            self.reg_file.set_phys_active(dst.phys, result.val);
                         }
                     }
                     Inst::BranchIfEqual(_, _, _)
@@ -675,11 +770,13 @@ impl OutOfOrder {
                     }
 
                     if inst.is_mem_access() {
+                        // If we got to this point, the speculation was correct.
+                        self.reg_file.end_predict_mem(tag, true);
                         self.lsq.release_load(tag);
                     }
                 }
                 Inst::StoreByte(_, _) | Inst::StoreWord(_, _) => {
-                    self.lsq.submit_store(tag, &self.reg_file, &mut self.mem)
+                    self.lsq.commit_store(tag, &self.reg_file, &mut self.mem)
                 }
                 Inst::BranchIfEqual(_, _, _)
                 | Inst::BranchIfLess(_, _, _)

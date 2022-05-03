@@ -95,6 +95,22 @@ impl ExecutionUnit {
         self.completed_inst.take()
     }
 
+    pub fn kill_specific(&mut self, tag: Tag) -> Tagged<ReadyInst> {
+        if let Some((tagged, _)) = &self.completed_inst {
+            if tagged.tag == tag {
+                todo!();
+                // self.completed_inst = None;
+            }
+        }
+
+        let pos = self
+            .executing_insts
+            .iter()
+            .position(|(ei, _)| ei.tag == tag)
+            .expect("kill_specific failed");
+        self.executing_insts.remove(pos).0
+    }
+
     pub fn kill_tags_after(&mut self, tag: Tag) {
         self.executing_insts
             .retain(|(Tagged { tag: t, .. }, _)| *t <= tag);

@@ -56,9 +56,8 @@ impl BranchPredictor {
             self.btb.get(&pc).copied()
         } else if inst == &Inst::JumpAndLinkRegister(ArchReg::Zero, ArchReg::RA, Imm(0)) {
             // Ret
-            let val = self.ras.pop();
+            self.ras.pop()
             // println!("Return from {:?} to {:?}", pc, val);
-            val
         } else {
             self.btb.get(&pc).copied()
         }

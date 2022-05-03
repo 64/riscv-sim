@@ -18,7 +18,7 @@ pub struct RegSet {
 type AliasTable = HashMap<ArchReg, PhysReg>;
 
 #[derive(Debug, Clone)]
-enum BranchType {
+enum SpecType {
     Direct {
         taken: bool,
         taken_pc: AbsPc,
@@ -28,15 +28,18 @@ enum BranchType {
         predicted_pc: Option<AbsPc>,
         inst_pc: AbsPc,
     },
+    Memory {
+        next_pc: AbsPc,
+    },
 }
 
 // See https://docs.boom-core.org/en/latest/sections/rename-stage.html#the-free-list
 #[derive(Debug, Clone)]
-pub struct BranchInfo {
+pub struct SpecInfo {
     // Options because we snapshot during rename (so that everything is in-order)
     rat_cp: Option<AliasTable>,
     alloc_list: Option<Vec<PhysReg>>,
-    info: BranchType,
+    info: SpecType,
 }
 
 #[derive(Clone)]
@@ -47,7 +50,7 @@ pub struct RegFile {
     rat: AliasTable,
     phys_rf: PhysFile,
     prrt: VecDeque<PhysReg>,
-    branch_info: HashMap<Tag, BranchInfo>,
+    spec_info: HashMap<Tag, SpecInfo>,
 }
 
 // https://ece.uwaterloo.ca/~maagaard/ece720-t4/lec-05.pdf
@@ -70,7 +73,7 @@ impl RegFile {
             rat: Default::default(),
             phys_rf: PhysFile(vec![PrfEntry::Free; prf_capacity]),
             prrt: Default::default(),
-            branch_info: Default::default(),
+            spec_info: Default::default(),
         };
 
         for reg in ArchReg::iter() {
@@ -106,14 +109,32 @@ impl RegFile {
 
     pub fn was_predicted_taken(&self, branch: Tag) -> bool {
         match self
-            .branch_info
+            .spec_info
             .get(&branch)
             .expect("no branch info for direct branch")
             .info
         {
-            BranchType::Direct { taken, .. } => taken,
+            SpecType::Direct { taken, .. } => taken,
             _ => unreachable!(),
         }
+    }
+
+    pub fn snapshot_for(&mut self, tag: Tag) {
+        if let Some(bi) = self.spec_info.get_mut(&tag) {
+            bi.rat_cp = Some(self.rat.clone());
+            bi.alloc_list = Some(Vec::new());
+        }
+    }
+
+    pub fn begin_predict_mem(&mut self, load: Tag, pc: AbsPc) {
+        self.spec_info.insert(
+            load,
+            SpecInfo {
+                rat_cp: None,
+                alloc_list: None,
+                info: SpecType::Memory { next_pc: pc },
+            },
+        );
     }
 
     pub fn begin_predict_direct(
@@ -123,12 +144,12 @@ impl RegFile {
         taken_pc: AbsPc,
         not_taken_pc: AbsPc,
     ) {
-        self.branch_info.insert(
+        self.spec_info.insert(
             branch,
-            BranchInfo {
+            SpecInfo {
                 rat_cp: None,
                 alloc_list: None,
-                info: BranchType::Direct {
+                info: SpecType::Direct {
                     taken,
                     taken_pc,
                     not_taken_pc,
@@ -143,17 +164,36 @@ impl RegFile {
         predicted_pc: Option<AbsPc>,
         inst_pc: AbsPc,
     ) {
-        self.branch_info.insert(
+        self.spec_info.insert(
             branch,
-            BranchInfo {
+            SpecInfo {
                 rat_cp: None,
                 alloc_list: None,
-                info: BranchType::Indirect {
+                info: SpecType::Indirect {
                     predicted_pc,
                     inst_pc,
                 },
             },
         );
+    }
+
+    pub fn end_predict_mem(&mut self, load: Tag, correct: bool) -> Option<AbsPc> {
+        match self.spec_info.remove(&load) {
+            Some(spec_info) => {
+                if !correct {
+                    self.mispredict(load, &spec_info);
+
+                    if let SpecType::Memory { next_pc } = spec_info.info {
+                        Some(next_pc)
+                    } else {
+                        unreachable!();
+                    }
+                } else {
+                    None
+                }
+            }
+            None => None,
+        }
     }
 
     pub fn end_predict_indirect(
@@ -163,10 +203,10 @@ impl RegFile {
         predicted_pc: Option<AbsPc>,
         branch_predictor: &mut BranchPredictor,
     ) {
-        let branch_info = self.branch_info.remove(&branch).unwrap();
+        let branch_info = self.spec_info.remove(&branch).unwrap();
 
         match branch_info.info {
-            BranchType::Indirect { inst_pc, .. } => {
+            SpecType::Indirect { inst_pc, .. } => {
                 branch_predictor.update_predict_indirect(inst_pc, actual_pc);
             }
             _ => unreachable!(),
@@ -187,10 +227,10 @@ impl RegFile {
         predicted: bool,
         branch_predictor: &mut BranchPredictor,
     ) -> Option<AbsPc> {
-        let branch_info = self.branch_info.remove(&branch).unwrap();
+        let branch_info = self.spec_info.remove(&branch).unwrap();
 
         match branch_info.info {
-            BranchType::Direct { not_taken_pc, .. } => {
+            SpecType::Direct { not_taken_pc, .. } => {
                 let inst_pc = not_taken_pc - INST_SIZE;
                 branch_predictor.update_predict_direct(inst_pc, taken);
             }
@@ -201,7 +241,7 @@ impl RegFile {
             self.mispredict(branch, &branch_info);
 
             match branch_info.info {
-                BranchType::Direct {
+                SpecType::Direct {
                     taken_pc,
                     not_taken_pc,
                     ..
@@ -219,7 +259,7 @@ impl RegFile {
         }
     }
 
-    fn mispredict(&mut self, tag: Tag, info: &BranchInfo) {
+    fn mispredict(&mut self, tag: Tag, info: &SpecInfo) {
         let alloc_list = info.alloc_list.as_ref().unwrap();
         self.rat = info.rat_cp.as_ref().unwrap().clone();
 
@@ -231,21 +271,22 @@ impl RegFile {
         }
 
         // self.branch_info.iter().for_each(|(&t, _)| debug_assert!(t >= tag));
-        self.branch_info.retain(|&t, _| t <= tag);
+        self.spec_info.retain(|&t, _| t <= tag);
 
         // Is this needed?
-        for bi in self.branch_info.values_mut() {
+        for si in self.spec_info.values_mut() {
             for _ in 0..num_removed {
-                bi.alloc_list.as_mut().map(|al| al.pop().unwrap());
+                si.alloc_list.as_mut().map(|al| al.pop());
             }
         }
     }
 
     pub fn kill_tags_after(&mut self, tag: Tag) {
         // // TODO: Is this needed?
-        self.branch_info
-            .iter()
-            .for_each(|(&t, _)| debug_assert!(t <= tag));
+        // self.spec_info
+        //     .iter()
+        //     .for_each(|(&t, _)| debug_assert!(t <= tag));
+        self.spec_info.retain(|t, _| t <= &tag);
     }
 
     fn allocate_phys_internal(&mut self) -> Option<PhysReg> {
@@ -257,7 +298,7 @@ impl RegFile {
 
     pub fn allocate_phys(&mut self, _tag: Tag) -> Option<PhysReg> {
         self.allocate_phys_internal().map(|slot| {
-            for branch in self.branch_info.values_mut() {
+            for branch in self.spec_info.values_mut() {
                 if let Some(al) = branch.alloc_list.as_mut() {
                     al.push(slot)
                 }
@@ -306,10 +347,7 @@ impl RegFile {
     }
 
     pub fn perform_rename(&mut self, tag: Tag, inst: Inst) -> Option<RenamedInst> {
-        if let Some(bi) = self.branch_info.get_mut(&tag) {
-            bi.rat_cp = Some(self.rat.clone());
-            bi.alloc_list = Some(Vec::new());
-        }
+        self.snapshot_for(tag);
 
         // Have to do this in two separate steps to prevent borrowing issues.
         let renamed_inst = inst.map_src_regs(|src_reg| match src_reg {
@@ -343,8 +381,8 @@ impl RegFile {
     }
 
     pub fn predicted_addr(&self, tag: Tag) -> (Option<AbsPc>, AbsPc) {
-        match self.branch_info.get(&tag).expect("no branch info").info {
-            BranchType::Indirect {
+        match self.spec_info.get(&tag).expect("no branch info").info {
+            SpecType::Indirect {
                 predicted_pc,
                 inst_pc,
             } => (predicted_pc, inst_pc),

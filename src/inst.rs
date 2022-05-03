@@ -6,7 +6,7 @@ use crate::{
 
 use std::{
     fmt::{self, Debug},
-    ops::{Add, AddAssign, Sub, Range},
+    ops::{Add, AddAssign, Range, Sub},
     str::FromStr,
 };
 use strum::{self, EnumIter, EnumString};
@@ -115,7 +115,7 @@ pub enum Inst<
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Tag(u64);
+pub struct Tag(pub u64);
 
 #[derive(Debug, Clone)]
 pub struct Tagged<I> {
@@ -517,7 +517,10 @@ impl ReadyInst {
         let end = match self {
             Inst::StoreWord(_, _) | Inst::LoadWord(_, _) => start + 4,
             Inst::StoreHalfWord(_, _) | Inst::LoadHalfWord(_, _) => start + 2,
-            Inst::LoadByte(_, _) | Inst::LoadByteU(_, _) | Inst::StoreByte(_, _) | Inst::IndexedLoadByteU(_, _, _, _) => start + 1,
+            Inst::LoadByte(_, _)
+            | Inst::LoadByteU(_, _)
+            | Inst::StoreByte(_, _)
+            | Inst::IndexedLoadByteU(_, _, _, _) => start + 1,
             _ => unimplemented!("{:?}", self),
         };
 

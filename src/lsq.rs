@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use crate::{
-    inst::{Inst, RenamedInst, Tag, Tagged},
+    inst::{AbsPc, Inst, RenamedInst, Tag, Tagged},
     mem::MemoryHierarchy,
     queue::Queue,
     regs::RegFile,
@@ -13,11 +13,18 @@ pub struct Store {
     address: Option<Range<u32>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LoadStatus {
+    NotExecuting,
+    InFlight,
+    WrittenBack,
+}
+
 #[derive(Debug, Clone)]
 pub struct Load {
     tagged: Tagged<RenamedInst>,
     address: Option<Range<u32>>,
-    completed: bool,
+    status: LoadStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -26,7 +33,7 @@ pub struct LoadStoreQueue {
     stores: Queue<Store>,
 }
 
-pub const MEM_SPECULATION: bool = true;
+pub const MEM_SPECULATION: bool = false;
 
 impl Store {
     pub fn new(tagged: Tagged<RenamedInst>) -> Self {
@@ -42,7 +49,7 @@ impl Load {
         Self {
             tagged,
             address: None,
-            completed: false,
+            status: LoadStatus::NotExecuting,
         }
     }
 }
@@ -79,7 +86,23 @@ impl LoadStoreQueue {
         assert!(res.is_none(), "no space in LSQ");
     }
 
-    pub fn can_execute_load(&mut self, tag: Tag, load_addr: Range<u32>) -> bool {
+    pub fn begin_execute_load(&mut self, load: Tag) {
+        let load = self
+            .loads
+            .iter_mut()
+            .find(|l| l.tagged.tag == load)
+            .expect("no load");
+        debug_assert!(load.status == LoadStatus::NotExecuting);
+        load.status = LoadStatus::InFlight;
+    }
+
+    pub fn can_execute_load(
+        &mut self,
+        tag: Tag,
+        _load_pc: AbsPc,
+        load_addr: Range<u32>,
+        _reg_file: &mut RegFile,
+    ) -> bool {
         if MEM_SPECULATION {
             // Insert the load_addr.
             let load = self
@@ -90,12 +113,15 @@ impl LoadStoreQueue {
             load.address = Some(load_addr.clone());
 
             // Optimistically return yes, unless we know the answer is definitely no.
-            self.stores.iter().filter(|s| s.tagged.tag < tag).all(|s| {
+            !self.stores.iter().filter(|s| s.tagged.tag < tag).any(|s| {
                 if let Some(store_addr) = &s.address {
-                    Self::ranges_disjoint(store_addr, &load_addr)
+                    // dbg!(&self);
+                    Self::ranges_overlap(store_addr, &load_addr)
                 } else {
                     // Begin a speculation
-                    true
+                    // println!("BEGIN SPECULATE {:?} at {:?}", tag, load_pc);
+                    // reg_file.begin_predict_mem(tag, load_pc);
+                    false
                 }
             })
         } else {
@@ -108,36 +134,74 @@ impl LoadStoreQueue {
         }
     }
 
-    fn ranges_disjoint(a: &Range<u32>, b: &Range<u32>) -> bool {
-        a.start <= b.end && a.end <= b.start
+    fn ranges_overlap(a: &Range<u32>, b: &Range<u32>) -> bool {
+        b.contains(&a.start) || a.contains(&b.start)
     }
 
-    pub fn store_addr_known(&mut self, tag: Tag, store_addr: Range<u32>) {
+    pub fn store_addr_known(
+        &mut self,
+        store_tag: Tag,
+        store_addr: Range<u32>,
+        _reg_file: &mut RegFile,
+    ) -> (Vec<Tag>, Vec<Tag>) {
         if MEM_SPECULATION {
             let store = self
                 .stores
                 .iter_mut()
-                .find(|s| s.tagged.tag == tag)
+                .find(|s| s.tagged.tag == store_tag)
                 .expect("no store");
             store.address = Some(store_addr.clone());
 
             // todo dont repeat this
             // Check if any later loads overlap us
-            let store_tag = store.tagged.tag;
-            let loads_to_kill = self.loads
+            let loads_to_kill = self
+                .loads
                 .iter()
-                .filter(|l| l.tagged.tag > store_tag && l.completed && l.address.is_some())
-                .filter(|l| !Self::ranges_disjoint(l.address.as_ref().unwrap(), &store_addr))
-                .map(|l| l.tagged.tag)
-                .collect::<Vec<_>>();
+                .filter(|l| {
+                    l.tagged.tag > store_tag
+                        && l.status != LoadStatus::NotExecuting
+                        && l.address.is_some()
+                })
+                .filter(|l| Self::ranges_overlap(l.address.as_ref().unwrap(), &store_addr))
+                .collect::<Vec<&Load>>();
 
-            assert!(loads_to_kill.is_empty());
+            // if !loads_to_kill.is_empty() {
+            // dbg!(store_tag);
+            // dbg!(&self);
+            // dbg!(&loads_to_kill);
+            // }
+
+            // assert!(loads_to_kill.is_empty());
+            let eu_kills = loads_to_kill
+                .iter()
+                .filter(|l| l.status == LoadStatus::InFlight)
+                .map(|l| l.tagged.tag)
+                .collect();
+            let mispredicts = loads_to_kill
+                .iter()
+                .filter(|l| l.status == LoadStatus::WrittenBack)
+                .map(|l| l.tagged.tag)
+                .collect();
+            (eu_kills, mispredicts)
+        } else {
+            (Vec::new(), Vec::new())
         }
     }
 
-    pub fn submit_store(&mut self, tag: Tag, rf: &RegFile, mem: &mut MemoryHierarchy) {
+    pub fn kill_inflight(&mut self, load: Tag) {
+        let load = self
+            .loads
+            .iter_mut()
+            .find(|l| l.tagged.tag == load)
+            .expect("no load found");
+
+        load.status = LoadStatus::NotExecuting;
+    }
+
+    pub fn commit_store(&mut self, tag: Tag, rf: &RegFile, mem: &mut MemoryHierarchy) {
         let store = self.stores.try_pop().unwrap();
         debug_assert_eq!(store.tagged.tag, tag);
+        // println!("COMMITTED STORE {:?}", tag);
 
         match store
             .tagged
@@ -155,9 +219,15 @@ impl LoadStoreQueue {
         }
     }
 
-    pub fn load_complete(&mut self, tag: Tag) {
-        let load = self.loads.iter_mut().find(|l| l.tagged.tag == tag).expect("no load found");
-        load.completed = true;
+    pub fn writeback_load(&mut self, tag: Tag) {
+        let load = self
+            .loads
+            .iter_mut()
+            .find(|l| l.tagged.tag == tag)
+            .expect("no load found");
+        // println!("WRITTEN BACK LOAD {:?}", tag);
+        debug_assert!(load.status == LoadStatus::InFlight);
+        load.status = LoadStatus::WrittenBack;
     }
 
     pub fn release_load(&mut self, tag: Tag) {

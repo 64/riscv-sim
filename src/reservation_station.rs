@@ -34,6 +34,14 @@ impl ReservationStation {
         self.waiting.push((tag, inst));
     }
 
+    pub fn insert_ready(&mut self, tag: Tag, inst: ReadyInst) {
+        let pos = self
+            .ready
+            .binary_search_by_key(&tag, |(t, _)| *t)
+            .unwrap_err();
+        self.ready.insert(pos, (tag, inst));
+    }
+
     // TODO: This interface (get_ready, pop_ready) is a bit janky
     pub fn get_ready(&mut self, reg_file: &RegFile) -> impl Iterator<Item = &(Tag, ReadyInst)> {
         self.waiting.retain(
