@@ -189,7 +189,7 @@ impl Cpu for OutOfOrder {
 impl OutOfOrder {
     #[allow(dead_code, unused)]
     fn dump(&self, pipe: &Pipeline) {
-        // dbg!(&self.lsq);
+        dbg!(&self.lsq);
         // dbg!(&self.reg_file);
         // dbg!(&self.reservation_station);
         // dbg!(&self.rob);
@@ -446,8 +446,10 @@ impl OutOfOrder {
         let mut remove_tags = vec![];
 
         for (tag, ready_inst) in self.reservation_station.get_ready(&self.reg_file) {
-            if ready_inst.is_load() && !self.lsq.can_execute_load(*tag) {
+            if ready_inst.is_load() && !self.lsq.can_execute_load(*tag, ready_inst.access_range()) {
                 continue;
+            } else if ready_inst.is_store() {
+                self.lsq.store_addr_known(*tag, ready_inst.access_range());
             }
 
             if let Some(eu) = self
@@ -483,6 +485,7 @@ impl OutOfOrder {
             }
 
             // This will only happen once per cycle because there is only one branch unit
+            // Otherwise we will need to recover to the oldest mis-speculated branch.
             if let Some(next_pc) = res.next_fetch.take() {
                 debug_assert!(next_fetch.is_none());
                 next_fetch = Some(next_pc);
@@ -532,6 +535,10 @@ impl OutOfOrder {
                     | Inst::LoadByteU(dst, _) => {
                         if dst.arch != ArchReg::Zero {
                             self.reg_file.set_phys_active(dst.phys, result.val);
+                        }
+
+                        if inst.is_load() {
+                            self.lsq.load_complete(tag);
                         }
                     }
                     Inst::BranchIfEqual(_, _, _)

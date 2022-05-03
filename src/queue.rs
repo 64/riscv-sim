@@ -38,6 +38,10 @@ impl<T: Clone> Queue<T> {
         self.data.capacity() == self.data.len()
     }
 
+    pub fn iter(&self) -> vec_deque::Iter<'_, T> {
+        self.data.iter()
+    }
+
     pub fn iter_mut(&mut self) -> vec_deque::IterMut<'_, T> {
         self.data.iter_mut()
     }

@@ -6,7 +6,7 @@ use crate::{
 
 use std::{
     fmt::{self, Debug},
-    ops::{Add, AddAssign, Sub},
+    ops::{Add, AddAssign, Sub, Range},
     str::FromStr,
 };
 use strum::{self, EnumIter, EnumString};
@@ -510,6 +510,18 @@ impl ReadyInst {
             Inst::IndexedLoadByteU(_, src1, src2, imm) => Addr(src1 + src2 + imm.0),
             _ => unimplemented!("{:?}", self),
         }
+    }
+
+    pub fn access_range(&self) -> Range<u32> {
+        let start = self.access_addr().0;
+        let end = match self {
+            Inst::StoreWord(_, _) | Inst::LoadWord(_, _) => start + 4,
+            Inst::StoreHalfWord(_, _) | Inst::LoadHalfWord(_, _) => start + 2,
+            Inst::LoadByte(_, _) | Inst::LoadByteU(_, _) | Inst::StoreByte(_, _) | Inst::IndexedLoadByteU(_, _, _, _) => start + 1,
+            _ => unimplemented!("{:?}", self),
+        };
+
+        start..end
     }
 }
 
